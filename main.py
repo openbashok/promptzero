@@ -40,9 +40,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="api-pii",
-    description="Transparent Claude API proxy — sanitizes PII/sensitive data before it leaves your environment.",
-    version="0.2.0",
+    title="PromptZero",
+    description="Zero trace. Full answer. — Transparent Claude API proxy that keeps sensitive data in your environment.",
+    version="2.2.0",
     lifespan=lifespan,
 )
 
