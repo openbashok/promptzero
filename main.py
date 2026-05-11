@@ -11,9 +11,10 @@ Session lifecycle:
   • DELETE /sessions/<id> to reset a session's mapping table.
 """
 
-import json
+import asyncio
 import os
 import uuid
+from contextlib import asynccontextmanager
 from typing import AsyncIterator, Optional
 
 import httpx
@@ -21,7 +22,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from sanitizer import Sanitizer
+from sanitizer import Sanitizer, _get_analyzer, nlp_available
 
 load_dotenv()
 
@@ -29,10 +30,20 @@ CLAUDE_BASE_URL = "https://api.anthropic.com"
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 PORT = int(os.getenv("PORT", "8000"))
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Pre-warm the NLP engine at startup so the first request isn't slow
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, _get_analyzer)
+    yield
+
+
 app = FastAPI(
     title="api-pii",
     description="Transparent Claude API proxy — sanitizes PII/sensitive data before it leaves your environment.",
-    version="0.1.0",
+    version="0.2.0",
+    lifespan=lifespan,
 )
 
 # In-memory session store  { session_id -> Sanitizer }
@@ -51,7 +62,7 @@ def _get_session(session_id: str) -> Sanitizer:
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "active_sessions": len(_sessions)}
+    return {"status": "ok", "active_sessions": len(_sessions), "nlp_enabled": nlp_available()}
 
 
 @app.get("/sessions/{session_id}/mappings")
