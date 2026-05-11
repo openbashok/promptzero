@@ -11,7 +11,8 @@ just talk to the proxy as if it were the Claude API directly.
 
 | Example | Description |
 |---|---|
-| [`document_summary/`](document_summary/) | Upload a PDF, DOCX or TXT — get a summary with real data restored |
+| [`document_summary/`](document_summary/) | Summarize a PDF, DOCX or TXT — names, emails, IPs restored in output |
+| [`pentest_report/`](pentest_report/) | Generate technical/executive/remediation reports from findings JSON |
 
 ## Ideas for future examples
 
