@@ -286,8 +286,18 @@ GET  /sessions/{session_id}/mappings
 DELETE /sessions/{session_id}
 ```
 
-`/stats` is designed for live monitoring during demos — pop a terminal
-with:
+The proxy terminal also prints **one colored trace line per request**,
+showing exactly what got sanitized — ideal for split-screen with Claude
+Code so a viewer sees PII getting redacted in real time:
+
+```
+[trace] POST /v1/messages     session=poc-pent  +4 spans (total 4: 1 phone, 1 email, 1 ipv4, 1 url)  in= 197B out= 494B  200 2012ms
+[trace] POST /v1/messages     session=poc-pent  +3 spans (total 7: 2 ipv4, 1 person, 1 hostname)  in= 185B out= 697B  200 1273ms
+[trace] GET   /v1/models           (passthrough, no sanitization)  200  367ms
+```
+
+For cumulative dashboards `/stats` is designed for live monitoring during
+demos — pop a terminal with:
 
 ```bash
 watch -n 1 'curl -s localhost:8000/stats | jq'

@@ -262,6 +262,24 @@ suben cada segundo:
 Funciona perfecto como overlay durante el plano "the proof" — el espectador
 ve los números reaccionar en tiempo real mientras vos hablás.
 
+### B5 — Live trace en la terminal del proxy (gratis, ya viene incluido)
+
+La terminal donde corre `./run_demo.sh` imprime **una línea coloreada por
+cada request** automáticamente. Es perfecto para split-screen con Claude
+Code: cuando tipeás un prompt, aparece la línea con el detalle.
+
+```
+[trace] POST /v1/messages     session=poc-pent  +4 spans (total 4: 1 phone, 1 email, 1 ipv4, 1 url)  in=  197B out=  494B  200 2012ms
+[trace] POST /v1/messages     session=poc-pent  +3 spans (total 7: 2 ipv4, 1 phone, 1 person, 1 hostname)  in=  185B out=  697B  200 1273ms
+[trace] GET   /v1/models           (passthrough, no sanitization)  200  367ms
+```
+
+Lectura: `+N spans` es lo que sanitizó **esta** request específica;
+`total N` es el running total de la sesión; `in/out` son bytes del body.
+
+Sin configuración adicional. Ideal para mostrar mientras chateás en Claude
+Code que cada turno está siendo procesado.
+
 ---
 
 ## Comandos de emergencia (si algo falla en vivo)

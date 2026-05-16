@@ -151,6 +151,65 @@ def _aggregate_pii_counts() -> dict:
     return dict(total)
 
 
+# ANSI color codes for the live trace lines — make it obvious in the proxy
+# terminal what's being sanitized at every Claude Code turn.
+_CLR = {
+    "reset": "\033[0m",
+    "dim":   "\033[2m",
+    "bold":  "\033[1m",
+    "green": "\033[32m",
+    "cyan":  "\033[36m",
+    "yel":   "\033[33m",
+    "red":   "\033[31m",
+}
+
+
+def _log_trace(
+    route: str,
+    session_id: str,
+    sanitizer: Sanitizer,
+    bytes_in: int,
+    bytes_out: int,
+    status: int,
+    elapsed_ms: int,
+    spans_before: int = 0,
+) -> None:
+    """One-line live trace per request — prints to the proxy terminal so
+    a user running Claude Code in another terminal can see in real time
+    exactly which PII was masked on each turn."""
+    snap = sanitizer.table.snapshot()
+    spans_after = snap["total_entries"]
+    new_spans = max(spans_after - spans_before, 0)
+
+    # Per-kind counts hit on THIS request — derived from cross-session
+    # totals isn't quite right; instead use the session's running total
+    # (good enough as the session_id is per-conversation).
+    kind_breakdown = ", ".join(
+        f"{n} {k}" for k, n in sorted(
+            ((k, v) for k, v in snap["counters_by_type"].items()
+             if not k.startswith("_")),
+            key=lambda x: -x[1],
+        )[:6]
+    ) or "—"
+
+    status_color = (
+        _CLR["green"] if 200 <= status < 300
+        else _CLR["yel"] if 300 <= status < 500
+        else _CLR["red"]
+    )
+    print(
+        f"{_CLR['cyan']}[trace]{_CLR['reset']} "
+        f"{_CLR['bold']}{route:<22}{_CLR['reset']} "
+        f"session={_CLR['dim']}{session_id[:8]}{_CLR['reset']}  "
+        f"{_CLR['yel']}+{new_spans} spans{_CLR['reset']} "
+        f"(total {spans_after}: {kind_breakdown})  "
+        f"in={bytes_in:>5}B out={bytes_out:>5}B  "
+        f"{status_color}{status}{_CLR['reset']} "
+        f"{_CLR['dim']}{elapsed_ms}ms{_CLR['reset']}",
+        flush=True,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Management endpoints
 # ---------------------------------------------------------------------------
@@ -269,15 +328,18 @@ async def proxy_messages(
     # --- Stats ---
     _bump("requests_total")
     _bump("requests_messages")
+    _t0 = time.time()
 
     # --- Session ---
     session_id = x_session_id or str(uuid.uuid4())
     sanitizer = _get_session(session_id)
+    _spans_before = sanitizer.table.snapshot()["total_entries"]
 
     # --- Sanitize request body ---
     body = await request.json()
     import json as _json  # noqa: PLC0415
-    _bump("bytes_sanitized_in", len(_json.dumps(body, ensure_ascii=False)))
+    _bytes_in = len(_json.dumps(body, ensure_ascii=False))
+    _bump("bytes_sanitized_in", _bytes_in)
     clean_body = sanitizer.sanitize_request(body)
 
     # --- Build upstream headers ---
@@ -350,7 +412,18 @@ async def proxy_messages(
 
     desanitized = sanitizer.desanitize_response(response_data)
     import json as _json  # noqa: PLC0415
-    _bump("bytes_desanitized_out", len(_json.dumps(desanitized, ensure_ascii=False)))
+    _bytes_out = len(_json.dumps(desanitized, ensure_ascii=False))
+    _bump("bytes_desanitized_out", _bytes_out)
+    _log_trace(
+        route="POST /v1/messages",
+        session_id=session_id,
+        sanitizer=sanitizer,
+        bytes_in=_bytes_in,
+        bytes_out=_bytes_out,
+        status=resp.status_code,
+        elapsed_ms=int((time.time() - _t0) * 1000),
+        spans_before=_spans_before,
+    )
     return JSONResponse(
         content=desanitized,
         status_code=resp.status_code,
@@ -376,13 +449,16 @@ async def proxy_count_tokens(
 
     _bump("requests_total")
     _bump("requests_count_tokens")
+    _t0 = time.time()
 
     session_id = x_session_id or str(uuid.uuid4())
     sanitizer = _get_session(session_id)
+    _spans_before = sanitizer.table.snapshot()["total_entries"]
 
     body = await request.json()
     import json as _json  # noqa: PLC0415
-    _bump("bytes_sanitized_in", len(_json.dumps(body, ensure_ascii=False)))
+    _bytes_in = len(_json.dumps(body, ensure_ascii=False))
+    _bump("bytes_sanitized_in", _bytes_in)
     clean_body = sanitizer.sanitize_request(body)
 
     upstream_headers = {
@@ -410,8 +486,20 @@ async def proxy_count_tokens(
             },
             headers={"x-session-id": session_id},
         )
+
+    out = resp.json()
+    _log_trace(
+        route="POST /v1/.../count_tokens",
+        session_id=session_id,
+        sanitizer=sanitizer,
+        bytes_in=_bytes_in,
+        bytes_out=len(_json.dumps(out, ensure_ascii=False)),
+        status=resp.status_code,
+        elapsed_ms=int((time.time() - _t0) * 1000),
+        spans_before=_spans_before,
+    )
     return JSONResponse(
-        content=resp.json(),
+        content=out,
         status_code=resp.status_code,
         headers={"x-session-id": session_id},
     )
@@ -440,6 +528,7 @@ async def passthrough(request: Request, path: str):
     """Forward unhandled /v1/* requests to Claude unchanged."""
     _bump("requests_total")
     _bump("requests_passthrough")
+    _pt_t0 = time.time()
     target_url = f"{CLAUDE_BASE_URL}/v1/{path}"
 
     # Reconstruct upstream headers, injecting our API key if the caller
@@ -468,17 +557,34 @@ async def passthrough(request: Request, path: str):
     response_headers = {
         k: v for k, v in resp.headers.items() if k.lower() not in _HOP_BY_HOP
     }
-    return JSONResponse(
-        content=resp.json() if resp.headers.get("content-type", "").startswith("application/json") else None,
-        status_code=resp.status_code,
-        headers=response_headers,
-    ) if resp.headers.get("content-type", "").startswith("application/json") else \
-        StreamingResponse(
-            iter([resp.content]),
+
+    elapsed = int((time.time() - _pt_t0) * 1000)
+    status_color = (
+        _CLR["green"] if 200 <= resp.status_code < 300
+        else _CLR["yel"] if 300 <= resp.status_code < 500
+        else _CLR["red"]
+    )
+    print(
+        f"{_CLR['cyan']}[trace]{_CLR['reset']} "
+        f"{_CLR['bold']}{request.method:<5} /v1/{path:<16}{_CLR['reset']} "
+        f"{_CLR['dim']}(passthrough, no sanitization){_CLR['reset']}  "
+        f"{status_color}{resp.status_code}{_CLR['reset']} "
+        f"{_CLR['dim']}{elapsed}ms{_CLR['reset']}",
+        flush=True,
+    )
+
+    if resp.headers.get("content-type", "").startswith("application/json"):
+        return JSONResponse(
+            content=resp.json(),
             status_code=resp.status_code,
             headers=response_headers,
-            media_type=resp.headers.get("content-type"),
         )
+    return StreamingResponse(
+        iter([resp.content]),
+        status_code=resp.status_code,
+        headers=response_headers,
+        media_type=resp.headers.get("content-type"),
+    )
 
 
 # ---------------------------------------------------------------------------
