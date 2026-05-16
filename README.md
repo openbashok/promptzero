@@ -276,11 +276,49 @@ curl http://localhost:8000/v1/messages \
 # Health check
 GET  /health
 
+# Cumulative counters since startup (requests, bytes, PII spans by kind)
+GET  /stats
+
 # Inspect what PromptZero mapped in a session (debug)
 GET  /sessions/{session_id}/mappings
 
 # Reset a session's mapping table
 DELETE /sessions/{session_id}
+```
+
+`/stats` is designed for live monitoring during demos — pop a terminal
+with:
+
+```bash
+watch -n 1 'curl -s localhost:8000/stats | jq'
+```
+
+…and watch the counters tick up every time you hit Claude through the
+proxy. Example payload:
+
+```json
+{
+  "uptime_seconds": 142.3,
+  "active_sessions": 2,
+  "requests": {
+    "total": 7,
+    "messages": 5,
+    "count_tokens": 1,
+    "passthrough": 1,
+    "errors": 0
+  },
+  "bytes": {
+    "sanitized_in":   12480,
+    "desanitized_out": 28350
+  },
+  "pii_spans": {
+    "total_unique": 47,
+    "by_kind": {
+      "person": 8, "org": 5, "ipv4": 14, "hostname": 9,
+      "email": 6, "national_id_ar_dni": 3, "phone": 2
+    }
+  }
+}
 ```
 
 ### Routing the Claude Code CLI through PromptZero

@@ -243,6 +243,25 @@ curl -s http://localhost:8000/sessions/<session-id>/mappings | jq
 
 Para mostrar que la tabla real ↔ ficticio nunca sale de la máquina.
 
+### B4 — Counters en vivo (ideal para overlay del video)
+
+Abrí una terminal chica en una esquina con:
+
+```bash
+watch -n 1 'curl -s localhost:8000/stats | jq'
+```
+
+Mientras tipeás en Claude Code o corrés `demo_html.py`, los contadores
+suben cada segundo:
+
+- `requests.total` ↑
+- `bytes.sanitized_in` ↑
+- `pii_spans.total_unique` ↑
+- `pii_spans.by_kind.person`, `.ipv4`, `.hostname`, etc.
+
+Funciona perfecto como overlay durante el plano "the proof" — el espectador
+ve los números reaccionar en tiempo real mientras vos hablás.
+
 ---
 
 ## Comandos de emergencia (si algo falla en vivo)

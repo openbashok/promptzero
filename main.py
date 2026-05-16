@@ -21,7 +21,9 @@ Session lifecycle:
 
 import asyncio
 import os
+import time
 import uuid
+from collections import Counter
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Optional
 
@@ -118,6 +120,38 @@ def _get_session(session_id: str) -> Sanitizer:
 
 
 # ---------------------------------------------------------------------------
+# Cumulative stats (in-memory, reset on restart). Surface via GET /stats.
+# ---------------------------------------------------------------------------
+
+_started_at = time.time()
+_stats = {
+    "requests_total": 0,
+    "requests_messages": 0,
+    "requests_count_tokens": 0,
+    "requests_passthrough": 0,
+    "bytes_sanitized_in": 0,
+    "bytes_desanitized_out": 0,
+    "errors_total": 0,
+}
+
+
+def _bump(metric: str, n: int = 1) -> None:
+    _stats[metric] = _stats.get(metric, 0) + n
+
+
+def _aggregate_pii_counts() -> dict:
+    """Sum per-kind PII counters across every active session. Internal
+    counters (starting with '_') are hidden from the public stats."""
+    total: Counter = Counter()
+    for s in _sessions.values():
+        for kind, n in s.table.snapshot()["counters_by_type"].items():
+            if kind.startswith("_"):
+                continue
+            total[kind] += n
+    return dict(total)
+
+
+# ---------------------------------------------------------------------------
 # Management endpoints
 # ---------------------------------------------------------------------------
 
@@ -132,6 +166,34 @@ async def health():
             UPSTREAM_CA_BUNDLE if UPSTREAM_CA_BUNDLE
             else (True if UPSTREAM_VERIFY else False)
         ),
+    }
+
+
+@app.get("/stats")
+async def stats():
+    """Cumulative counters since the proxy started — designed for live
+    monitoring during demos (`watch -n 1 'curl -s :8000/stats | jq'`)."""
+    pii = _aggregate_pii_counts()
+    return {
+        "uptime_seconds": round(time.time() - _started_at, 1),
+        "active_sessions": len(_sessions),
+        "requests": {
+            "total":         _stats["requests_total"],
+            "messages":      _stats["requests_messages"],
+            "count_tokens":  _stats["requests_count_tokens"],
+            "passthrough":   _stats["requests_passthrough"],
+            "errors":        _stats["errors_total"],
+        },
+        "bytes": {
+            "sanitized_in":     _stats["bytes_sanitized_in"],
+            "desanitized_out":  _stats["bytes_desanitized_out"],
+        },
+        "pii_spans": {
+            "total_unique":  sum(pii.values()),
+            "by_kind":       pii,
+        },
+        "upstream_proxy": UPSTREAM_PROXY,
+        "nlp_enabled":    nlp_available(),
     }
 
 
@@ -204,12 +266,18 @@ async def proxy_messages(
             detail="No API key provided. Set ANTHROPIC_API_KEY in .env or pass x-api-key header.",
         )
 
+    # --- Stats ---
+    _bump("requests_total")
+    _bump("requests_messages")
+
     # --- Session ---
     session_id = x_session_id or str(uuid.uuid4())
     sanitizer = _get_session(session_id)
 
     # --- Sanitize request body ---
     body = await request.json()
+    import json as _json  # noqa: PLC0415
+    _bump("bytes_sanitized_in", len(_json.dumps(body, ensure_ascii=False)))
     clean_body = sanitizer.sanitize_request(body)
 
     # --- Build upstream headers ---
@@ -246,6 +314,7 @@ async def proxy_messages(
     # Cloudflare — surface it verbatim instead of crashing on resp.json().
     content_type = resp.headers.get("content-type", "")
     if not content_type.startswith("application/json"):
+        _bump("errors_total")
         snippet = resp.text[:500].replace("\n", " ")
         return JSONResponse(
             status_code=502,
@@ -267,6 +336,7 @@ async def proxy_messages(
     try:
         response_data = resp.json()
     except ValueError as exc:
+        _bump("errors_total")
         return JSONResponse(
             status_code=502,
             content={
@@ -279,6 +349,8 @@ async def proxy_messages(
         )
 
     desanitized = sanitizer.desanitize_response(response_data)
+    import json as _json  # noqa: PLC0415
+    _bump("bytes_desanitized_out", len(_json.dumps(desanitized, ensure_ascii=False)))
     return JSONResponse(
         content=desanitized,
         status_code=resp.status_code,
@@ -302,10 +374,15 @@ async def proxy_count_tokens(
     if not api_key:
         raise HTTPException(status_code=401, detail="No API key provided.")
 
+    _bump("requests_total")
+    _bump("requests_count_tokens")
+
     session_id = x_session_id or str(uuid.uuid4())
     sanitizer = _get_session(session_id)
 
     body = await request.json()
+    import json as _json  # noqa: PLC0415
+    _bump("bytes_sanitized_in", len(_json.dumps(body, ensure_ascii=False)))
     clean_body = sanitizer.sanitize_request(body)
 
     upstream_headers = {
@@ -361,6 +438,8 @@ _HOP_BY_HOP = {
 )
 async def passthrough(request: Request, path: str):
     """Forward unhandled /v1/* requests to Claude unchanged."""
+    _bump("requests_total")
+    _bump("requests_passthrough")
     target_url = f"{CLAUDE_BASE_URL}/v1/{path}"
 
     # Reconstruct upstream headers, injecting our API key if the caller
