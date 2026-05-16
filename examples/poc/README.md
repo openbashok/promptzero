@@ -125,6 +125,43 @@ python demo_html.py --dataset data/05_customer_support_chat.json \
 El HTML resultante (~50–200 KB) no depende de ningún CDN ni recurso externo —
 se renderiza igual con la máquina offline.
 
+### `diagnose_upstream.py` — Por qué no veo tráfico en Burp?
+
+Si configuraste `UPSTREAM_PROXY` y no aparecen requests en Burp, este script
+hace los 5 checks típicos en orden y te dice exactamente qué arreglar:
+
+```bash
+python diagnose_upstream.py
+python diagnose_upstream.py --skip-claude   # no toca api.anthropic.com
+```
+
+Salida (todo OK):
+
+```
+━━━ 1. PromptZero proxy reachable at http://localhost:8000 ━━━
+  ✓ PASS  /health responded 200
+━━━ 2. Proxy /health reports the upstream config you expect ━━━
+  ✓ PASS  Proxy is configured to route through http://127.0.0.1:8080
+━━━ 3. Upstream proxy port is actually listening ━━━
+  ✓ PASS  127.0.0.1:8080 accepted a TCP connection
+━━━ 4. httpx can complete a real upstream request through Burp ━━━
+  ✓ PASS  Upstream call succeeded — this request should be visible in Burp now.
+━━━ 5. End-to-end: a real /v1/messages through PromptZero works ━━━
+  ✓ PASS  Claude responded: 'OK'
+  ✓ PASS  Session mapped 3 value(s) — db-prod.nexabank.local → localhost.localdomain.1
+```
+
+Falla típica más común — olvidaste reiniciar el proxy después de editar `.env`:
+
+```
+━━━ 2. Proxy /health reports the upstream config you expect ━━━
+  · Your .env says UPSTREAM_PROXY=http://127.0.0.1:8080
+  · The running proxy says upstream_proxy=None
+  ✗ FAIL  Your .env has UPSTREAM_PROXY set but the running proxy doesn't see it.
+          → The proxy reads .env ONCE at startup. Stop and restart `python main.py`
+            after editing .env.
+```
+
 ### `demo_local.py` — Demo standalone, sin tocar Claude
 
 Corre el `Sanitizer` localmente y muestra las 3 etapas en pantalla:

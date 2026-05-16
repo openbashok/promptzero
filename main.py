@@ -68,8 +68,32 @@ def _httpx_client(**extra) -> httpx.AsyncClient:
     return httpx.AsyncClient(**kwargs)
 
 
+def _log_startup_banner() -> None:
+    """Print a loud, obvious summary of the upstream config so it's
+    immediately clear whether traffic is going direct or through Burp."""
+    bar = "─" * 70
+    print(bar)
+    print(f" PromptZero — upstream config")
+    print(bar)
+    if UPSTREAM_PROXY:
+        print(f"  upstream_proxy   : {UPSTREAM_PROXY}")
+        if UPSTREAM_CA_BUNDLE:
+            print(f"  upstream_verify  : {UPSTREAM_CA_BUNDLE}  (CA bundle)")
+        elif UPSTREAM_VERIFY:
+            print(f"  upstream_verify  : True  (default trust store)")
+        else:
+            print(f"  upstream_verify  : DISABLED  (insecure — demo only)")
+        print(f"  → All traffic to api.anthropic.com will route through")
+        print(f"    {UPSTREAM_PROXY} — watch it land in your interception proxy.")
+    else:
+        print(f"  upstream_proxy   : (none — going direct to api.anthropic.com)")
+        print(f"  To route through Burp: set UPSTREAM_PROXY in .env and restart.")
+    print(bar)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _log_startup_banner()
     # Pre-warm the NLP engine at startup so the first request isn't slow
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, _get_analyzer)
