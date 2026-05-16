@@ -1,0 +1,105 @@
+{
+  "_description": "Fictional customer-support chat transcripts loaded with PII to demonstrate sanitization on conversational text. Every customer, agent, account number, card, address, phone and email below is invented.",
+  "company": "Nexabank Financial S.A.",
+  "exported_at": "2026-05-12T16:42:00Z",
+  "exported_by": "Andrea Patricia Lombardi <a.lombardi@nexabank.com>",
+
+  "conversations": [
+    {
+      "thread_id": "CHAT-77821",
+      "channel": "WhatsApp Business",
+      "customer": {
+        "name": "Valentina Mosqueira Iturralde",
+        "email": "v.mosqueira@correoprivado.com.ar",
+        "phone": "+54 9 351 4421-7788",
+        "national_id": "DNI 34.678.221",
+        "address": "Bv. San Juan 999, Piso 5, Nueva Córdoba, Córdoba"
+      },
+      "agent": {
+        "name": "Carolina Belén Astigarra",
+        "email": "c.astigarra@nexabank.com",
+        "id": "AGT-119"
+      },
+      "messages": [
+        { "ts": "2026-05-10T14:02:11Z", "from": "customer", "body": "Hola, soy Valentina Mosqueira. Veo dos cargos duplicados con mi tarjeta 4127 8800 5511 9904 por USD 4280.50 cada uno." },
+        { "ts": "2026-05-10T14:02:48Z", "from": "agent",    "body": "Hola Valentina, gracias por escribir. ¿Me confirmás tu DNI y el correo registrado para validar la cuenta?" },
+        { "ts": "2026-05-10T14:03:25Z", "from": "customer", "body": "DNI 34.678.221, email v.mosqueira@correoprivado.com.ar, número de cliente CUST-44912." },
+        { "ts": "2026-05-10T14:05:01Z", "from": "agent",    "body": "Verificado. Veo dos transacciones a Globex Aerolíneas — Buenos Aires el 2026-04-12 a las 18:42 y 18:46 UTC. Voy a abrir el contracargo DISP-9921." },
+        { "ts": "2026-05-10T14:06:32Z", "from": "customer", "body": "Perfecto. Mi teléfono por si necesitan llamar es +54 9 351 4421-7788. ¿Cuánto tarda?" },
+        { "ts": "2026-05-10T14:07:10Z", "from": "agent",    "body": "El crédito provisorio se aplica a tu cuenta IBAN AR2200099990000445566001 en 48 hs. La resolución final está prevista para 2026-06-09." }
+      ]
+    },
+
+    {
+      "thread_id": "CHAT-77904",
+      "channel": "Web chat",
+      "customer": {
+        "name": "Joaquín Eugenio Bertoldi-Mancuso",
+        "email": "joaco.bertoldi@startupmail.io",
+        "phone": "+54 9 261 5544-8821",
+        "national_id": "DNI 29.110.448",
+        "address": "Av. Las Heras 250, Piso 9 Dto F, Ciudad de Mendoza"
+      },
+      "agent": {
+        "name": "Hernán Maximiliano Ruiz",
+        "email": "h.ruiz@nexabank.com",
+        "id": "AGT-077"
+      },
+      "messages": [
+        { "ts": "2026-05-11T09:14:01Z", "from": "customer", "body": "Buen día, hablo Joaquín Bertoldi. No reconozco un cargo de USD 12990 con mi tarjeta terminada en 1188 a Initech Hardware Imports." },
+        { "ts": "2026-05-11T09:14:50Z", "from": "agent",    "body": "Joaquín, lamento el inconveniente. ¿Podés pasarme tu DNI y mail registrado?" },
+        { "ts": "2026-05-11T09:15:30Z", "from": "customer", "body": "DNI 29.110.448, mail joaco.bertoldi@startupmail.io. Estoy físicamente en Mendoza, no en Buenos Aires donde se hizo la compra." },
+        { "ts": "2026-05-11T09:17:05Z", "from": "agent",    "body": "Verificado. Bloqueo de tu tarjeta 6011 0099 2200 1188 ya cargado. Voy a despachar reposición al domicilio Av. Las Heras 250 Piso 9 Dto F en 48-72 hs. ¿Confirmás un teléfono móvil para coordinar entrega?" },
+        { "ts": "2026-05-11T09:17:58Z", "from": "customer", "body": "Sí, +54 9 261 5544-8821. Pasame también el número de ticket de contracargo." },
+        { "ts": "2026-05-11T09:19:11Z", "from": "agent",    "body": "Ticket DISP-9988. El monto se reintegra a la cuenta IBAN AR8800099990000778899221." }
+      ]
+    },
+
+    {
+      "thread_id": "CHAT-77912",
+      "channel": "Email — support@nexabank.com",
+      "customer": {
+        "name": "Sofía del Carmen Pellegrini Torrejón",
+        "email": "sofi.pellegrini@empresafamiliar.com.ar",
+        "phone": "+54 9 11 7788-4499",
+        "national_id": "DNI 32.881.005",
+        "address": "Boulevard del Mirador 1280, Piso 14, Puerto Madero, CABA"
+      },
+      "agent": {
+        "name": "Roberto Carlos Silva",
+        "email": "r.silva@nexabank.com",
+        "id": "AGT-001"
+      },
+      "messages": [
+        { "ts": "2026-05-12T11:00:00Z", "from": "customer", "body": "Estimados, soy Sofía Pellegrini, cliente VIP CUST-45102. Quiero ampliar mi línea de crédito a USD 500,000 para una operación inmobiliaria. Por favor contactarme al +54 9 11 7788-4499 o por email sofi.pellegrini@empresafamiliar.com.ar." },
+        { "ts": "2026-05-12T11:42:13Z", "from": "agent",    "body": "Estimada Sofía, le escribo desde Mesa de Clientes Premium. Para evaluar el incremento solicitado a USD 500,000 sobre sus tarjetas 5111 4422 8899 0033 y 4929 8800 7711 2244 necesitaría última declaración de impuestos y constancia de ingresos. Su límite actual es USD 410,000.\\n\\nQuedo a disposición.\\nRoberto C. Silva — CISO / Atención VIP." }
+      ]
+    },
+
+    {
+      "thread_id": "CHAT-78001",
+      "channel": "Inbound call (transcribed)",
+      "customer": {
+        "name": "Anónimo — número entrante",
+        "phone": "+54 9 11 6612-3344",
+        "alleged_relationship": "Padre de cliente fallecido"
+      },
+      "agent": {
+        "name": "Carolina Belén Astigarra",
+        "email": "c.astigarra@nexabank.com",
+        "id": "AGT-119"
+      },
+      "messages": [
+        { "ts": "2026-05-12T15:28:00Z", "from": "customer", "body": "Hola, llamo en nombre de mi hijo, Federico Andrés Cabrera, DNI 35.998.114, fallecido el 2026-04-30. Tiene cuenta IBAN AR5500088880000099887766 y tarjeta 4485 1100 2233 8800. Quiero saber cómo cerrar todo y transferir saldo al beneficiario." },
+        { "ts": "2026-05-12T15:28:55Z", "from": "agent",    "body": "Lamento mucho su pérdida. Para sucesiones necesito que envíe acta de defunción, DNI del causante y del beneficiario, y declaratoria de herederos a sucesiones@nexabank.com. ¿Me podría indicar su nombre y un teléfono de contacto?" },
+        { "ts": "2026-05-12T15:29:42Z", "from": "customer", "body": "Soy Eduardo Mario Cabrera, DNI 11.223.445, teléfono +54 9 11 6612-3344. Vivo en Calle Pinedo 1287, Avellaneda, Buenos Aires, B1870ABC." }
+      ]
+    }
+  ],
+
+  "agent_notes": [
+    "CHAT-77821 — confirmado fraude vendor side. Crédito provisorio acreditado. Card 4127 8800 5511 9904 reemplazada por 4127 8800 5511 0023.",
+    "CHAT-77912 — escalado a comité de crédito. Sofía Pellegrini Torrejón es referente de cuenta de Esteban Mansilla (CTO) — manejar con discreción extra.",
+    "CHAT-78001 — sucesión iniciada. Cuenta del causante Federico Andrés Cabrera congelada. Bloqueada tarjeta 4485 1100 2233 8800."
+  ]
+}

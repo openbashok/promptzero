@@ -1,0 +1,171 @@
+{
+  "_description": "Fictional HR/CRM customer export — used to demonstrate PII anonymization. Every name, email, phone, ID, IBAN, credit card and address below is invented.",
+  "company": {
+    "legal_name": "Nexabank Financial S.A.",
+    "trade_name": "Nexabank",
+    "tax_id": "30-71234567-9",
+    "headquarters": "Av. Corrientes 1234, C1043AAZ, Ciudad Autónoma de Buenos Aires, Argentina",
+    "support_email": "soporte@nexabank.com",
+    "support_phone": "+54 11 4321-7890",
+    "data_protection_officer": {
+      "name": "Lucía Bonomi",
+      "email": "dpo@nexabank.com",
+      "phone": "+54 11 4555-1098"
+    }
+  },
+  "employees": [
+    {
+      "id": "EMP-00781",
+      "full_name": "Roberto Carlos Silva",
+      "role": "Chief Information Security Officer",
+      "department": "Information Security",
+      "manager": "Esteban Ariel Mansilla",
+      "email": "r.silva@nexabank.com",
+      "personal_email": "robi.silva72@gmail.com",
+      "phone_office": "+54 11 4321-7811",
+      "phone_mobile": "+54 9 11 5588-3221",
+      "national_id": "DNI 23.456.789",
+      "passport": "AAH123456",
+      "address": "Calle Defensa 1450, Piso 7 Dto B, San Telmo, CABA, C1143ABC",
+      "iban": "AR1500011110000123456789",
+      "salary_account_credit_card": "4509 8732 1100 4421",
+      "github_handle": "robisilva",
+      "slack_handle": "@robi"
+    },
+    {
+      "id": "EMP-00984",
+      "full_name": "María Fernández Gallardo",
+      "role": "Senior Penetration Tester",
+      "department": "Red Team",
+      "manager": "Roberto Carlos Silva",
+      "email": "m.fernandez@nexabank.com",
+      "personal_email": "maria.fg@protonmail.com",
+      "phone_office": "+54 11 4321-7833",
+      "phone_mobile": "+54 9 11 6677-9912",
+      "national_id": "DNI 30.112.456",
+      "passport": "AAH987654",
+      "address": "Av. Cabildo 2380, Piso 12 Dto A, Belgrano, CABA, C1428AAA",
+      "iban": "AR2300011110000098765432",
+      "salary_account_credit_card": "5328 7720 4419 0021",
+      "github_handle": "mfgallardo",
+      "slack_handle": "@maria"
+    },
+    {
+      "id": "EMP-01122",
+      "full_name": "Diego Hernán Castelnuovo",
+      "role": "Cloud Infrastructure Engineer",
+      "department": "Platform Engineering",
+      "manager": "Andrea Patricia Lombardi",
+      "email": "d.castelnuovo@nexabank.com",
+      "personal_email": "diegocastel@hotmail.com",
+      "phone_office": "+54 11 4321-7855",
+      "phone_mobile": "+54 9 11 3344-2210",
+      "national_id": "DNI 28.998.110",
+      "passport": "AAH445566",
+      "address": "Echeverría 4321, Piso 3, Villa Urquiza, CABA, C1431ABC",
+      "iban": "AR9900011110000556677889",
+      "salary_account_credit_card": "4716 0098 5510 4488",
+      "ssh_key_fingerprint": "SHA256:Vh8mP2x9KjLqR4nB7tYwZ1cF6gH3sA0eD5uM2iJ8oQ4=",
+      "aws_access_key": "AKIAIOSFODNN7EXAMPLEKEY01",
+      "slack_handle": "@diego"
+    },
+    {
+      "id": "EMP-01577",
+      "full_name": "Andrea Patricia Lombardi",
+      "role": "VP of Engineering",
+      "department": "Engineering",
+      "manager": "Esteban Ariel Mansilla",
+      "email": "a.lombardi@nexabank.com",
+      "personal_email": "alombardi.work@gmail.com",
+      "phone_office": "+54 11 4321-7800",
+      "phone_mobile": "+54 9 11 2233-4455",
+      "national_id": "DNI 25.789.001",
+      "address": "Av. Santa Fe 3100, Piso 18, Recoleta, CABA, C1425BGL",
+      "iban": "AR4100011110000332211009",
+      "salary_account_credit_card": "5454 9988 3322 1100"
+    },
+    {
+      "id": "EMP-02001",
+      "full_name": "Esteban Ariel Mansilla",
+      "role": "Chief Technology Officer",
+      "department": "Executive",
+      "manager": null,
+      "email": "e.mansilla@nexabank.com",
+      "personal_email": "emansilla@me.com",
+      "phone_office": "+54 11 4321-7700",
+      "phone_mobile": "+54 9 11 9988-7766",
+      "national_id": "DNI 21.345.678",
+      "passport": "AAH001122",
+      "address": "Av. del Libertador 6788, Piso 25 Dto PH, Núñez, CABA, C1428ARH",
+      "iban": "AR7700011110000119988776",
+      "salary_account_credit_card": "3782 822463 10005"
+    }
+  ],
+  "vip_customers": [
+    {
+      "id": "CUST-44912",
+      "full_name": "Valentina Mosqueira Iturralde",
+      "email": "v.mosqueira@correoprivado.com.ar",
+      "phone": "+54 9 351 4421-7788",
+      "national_id": "DNI 34.678.221",
+      "address": "Bv. San Juan 999, Piso 5, Nueva Córdoba, Córdoba, X5000ABC",
+      "credit_cards": [
+        "4127 8800 5511 9904",
+        "5577 1166 4422 0098"
+      ],
+      "iban": "AR2200099990000445566001",
+      "credit_limit_usd": 250000,
+      "relationship_manager": "Diego Hernán Castelnuovo"
+    },
+    {
+      "id": "CUST-44999",
+      "full_name": "Joaquín Eugenio Bertoldi-Mancuso",
+      "email": "joaco.bertoldi@startupmail.io",
+      "phone": "+54 9 261 5544-8821",
+      "national_id": "DNI 29.110.448",
+      "address": "Av. Las Heras 250, Piso 9 Dto F, Ciudad de Mendoza, M5500ABC",
+      "credit_cards": [
+        "6011 0099 2200 1188"
+      ],
+      "iban": "AR8800099990000778899221",
+      "credit_limit_usd": 180000,
+      "relationship_manager": "Andrea Patricia Lombardi"
+    },
+    {
+      "id": "CUST-45102",
+      "full_name": "Sofía del Carmen Pellegrini Torrejón",
+      "email": "sofi.pellegrini@empresafamiliar.com.ar",
+      "phone": "+54 9 11 7788-4499",
+      "national_id": "DNI 32.881.005",
+      "address": "Boulevard del Mirador 1280, Piso 14, Puerto Madero, CABA, C1107ABC",
+      "credit_cards": [
+        "5111 4422 8899 0033",
+        "4929 8800 7711 2244"
+      ],
+      "iban": "AR3300099990000112233445",
+      "credit_limit_usd": 410000,
+      "relationship_manager": "Esteban Ariel Mansilla"
+    }
+  ],
+  "billing_disputes_q4": [
+    {
+      "ticket": "DISP-9921",
+      "customer": "Valentina Mosqueira Iturralde",
+      "card_ending": "9904",
+      "amount_usd": 4280.50,
+      "merchant": "Globex Aerolíneas — Buenos Aires",
+      "opened": "2026-04-12",
+      "notes": "Customer reports two duplicate charges within 4 minutes. Card 4127 8800 5511 9904 was used in person; chargeback initiated."
+    },
+    {
+      "ticket": "DISP-9988",
+      "customer": "Joaquín Eugenio Bertoldi-Mancuso",
+      "card_ending": "1188",
+      "amount_usd": 12990.00,
+      "merchant": "Initech Hardware Imports — Mendoza",
+      "opened": "2026-04-25",
+      "notes": "Customer denies authorization. Verified via SMS to +54 9 261 5544-8821."
+    }
+  ],
+  "notes": "This snapshot was generated 2026-05-10 by the compliance team for the quarterly GDPR review. Distribution restricted to: a.lombardi@nexabank.com, e.mansilla@nexabank.com, dpo@nexabank.com."
+}

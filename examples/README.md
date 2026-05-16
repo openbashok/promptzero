@@ -11,6 +11,7 @@ just talk to the proxy as if it were the Claude API directly.
 
 | Example | Description |
 |---|---|
+| [`poc/`](poc/) | **Proof-of-concept bundle** — 5 fictitious datasets (PII, full pentest with HTTP req/res + payloads, injection catalog, IR report, support chat) and two demo scripts (local + end-to-end Claude) |
 | [`document_summary/`](document_summary/) | Summarize a PDF, DOCX or TXT — names, emails, IPs restored in output |
 | [`pentest_report/`](pentest_report/) | Generate technical/executive/remediation reports from findings JSON |
 

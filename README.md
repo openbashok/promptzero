@@ -138,6 +138,7 @@ promptzero/
 ├── requirements.txt
 ├── .env.example
 └── examples/
+    ├── poc/                ← Proof-of-concept: 5 fictitious datasets + demo scripts (local + Claude E2E)
     ├── document_summary/   ← Summarize PDF/DOCX/TXT with PII protection
     └── pentest_report/     ← Generate full pentest reports from findings JSON
 ```
@@ -269,6 +270,29 @@ DELETE /sessions/{session_id}
 ---
 
 ## Examples
+
+### Proof of Concept
+
+The fastest way to *see* PromptZero in action — five fictitious datasets (personal
+data, full pentest engagement with HTTP req/res + payloads, injection catalog,
+incident response, support chat) plus two demo scripts.
+
+```bash
+cd examples/poc
+
+# Demo standalone — no API call, prints original / sanitized / desanitized
+# + the full real↔fake mapping table.
+python demo_local.py
+python demo_local.py data/01_personal_records.json
+python demo_local.py data/03_injection_catalog.json --max-preview 5000
+
+# End-to-end against the real Claude API (proxy must be running)
+python demo_claude.py
+python demo_claude.py --dataset data/04_incident_response.json --task triage
+```
+
+See [`examples/poc/README.md`](examples/poc/README.md) for the full dataset catalog,
+script options, and audience-facing talking points.
 
 ### Document Summary
 
