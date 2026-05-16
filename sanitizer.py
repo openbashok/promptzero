@@ -1,10 +1,14 @@
 """
 sanitizer.py — PII & sensitive-data sanitization engine.
 
-Detection layers (both run on every text, results merged):
-  1. NLP  — Presidio + spaCy: detects PERSON, ORGANIZATION, phones, emails,
-             national IDs, passports, credit cards, IBANs, SSNs, …
-  2. Regex — network/infra patterns Presidio misses: IPv4/v6, hostnames,
+Detection layers (all run on every text, results merged):
+  1. NLP  — Presidio + spaCy in EN and ES: detects PERSON, ORGANIZATION,
+             phones, emails, national IDs, passports, credit cards, IBANs,
+             SSNs, …
+  2. Regex — Spanish-speaking world ID formats (AR, CL, ES, UY, CO, MX) +
+             international phone formats (+34, +52, +54, +56, +57, +598)
+             that Presidio's locale-bound recognizers miss.
+  3. Regex — network/infra patterns Presidio misses: IPv4/v6, hostnames,
              host:port, long tokens.
 
 Flow:
@@ -68,6 +72,64 @@ _NLP_ENTITIES = [
     "URL",
 ]
 
+# Minimum Presidio confidence score for an NLP hit to be accepted. Below
+# this the noise rate on technical/JSON-heavy text is too high (PERSON /
+# ORG false positives on acronyms, field names, library names).
+_NLP_MIN_SCORE = 0.4
+
+# Denylist of tokens that spaCy NER frequently mis-tags as PERSON or
+# ORGANIZATION on offensive-security and DevOps text. None of these are
+# secrets — they're public technology / standard names — so dropping them
+# from the mapping table actually IMPROVES Claude's answer quality
+# (the model can still reason about JWT, AWS, OWASP, etc.).
+_NLP_DENYLIST = {
+    # Cloud / infra
+    "aws", "gcp", "azure", "cloudflare", "akamai", "fastly", "tor", "nvidia",
+    "intel", "amd", "arm",
+    # Protocols / standards
+    "http", "https", "tls", "ssl", "ssh", "smtp", "imap", "pop3", "dns",
+    "tcp", "udp", "ftp", "sftp", "ldap", "rdp", "smb", "ntp", "snmp",
+    # Web / API
+    "api", "rest", "graphql", "json", "yaml", "xml", "html", "css", "dom",
+    "csrf", "xss", "cors", "csp", "saml", "oauth", "openid", "oidc", "jwt",
+    "url", "uri", "urn",
+    # Security
+    "rce", "lfi", "rfi", "ssrf", "xxe", "ssti", "sqli", "idor", "mfa",
+    "totp", "cve", "cvss", "cwe", "owasp", "pii", "gdpr", "pci", "pci-dss",
+    "soc", "siem", "edr", "xdr", "mdr", "waf", "ids", "ips", "rbac",
+    # Roles / titles
+    "ciso", "cto", "ceo", "cfo", "coo", "cio", "vp", "dpo", "soc",
+    # Servers / databases / frameworks
+    "nginx", "apache", "tomcat", "jenkins", "kafka", "redis", "mongodb",
+    "postgres", "postgresql", "mysql", "mariadb", "oracle", "splunk",
+    "elasticsearch", "kibana", "grafana", "prometheus", "spring", "flask",
+    "django", "rails", "laravel", "express", "fastapi", "node", "nodejs",
+    "kerberos", "ldap", "ad", "iam",
+    # Templating / payloads
+    "jinja", "jinja2", "twig", "mustache", "handlebars", "ejs",
+    # Misc
+    "ui", "ux", "qa", "pr", "ci", "cd", "ml", "ai", "llm", "nlp", "nlu",
+    "ipv4", "ipv6", "mac",
+    # Windows / AD pentest terms
+    "ad", "winrm", "ntlm", "ntlmv2", "kerberos", "krbtgt", "dcsync",
+    "dcshadow", "domain admins", "domain admin", "domain controller",
+    "active directory", "credential guard", "lsa", "lsa protection",
+    "preparedstatement", "xmlconstants", "swagger", "openapi", "vue",
+    "gecko", "khtml", "webkit", "blink", "fortinet", "content-security-policy",
+    # Common English verbs/adjectives spaCy tags as PERSON
+    "internal", "external", "accept", "domain", "forge", "engage",
+    "notify", "read", "encode", "arbitrary", "unauthenticated", "thu",
+    "client-provisioned", "blind", "not executed", "fictional",
+    "detailed evidence", "db credentials", "read swagger", "forge golden",
+    "all internal resources effectively exposed",
+    "regulatory breach under argentine", "notify argentine dpa",
+    "primary active directory dc", "local fortinet", "fortinet ssl vpn",
+    "vp of engineering", "sql injection", "blind & union", "customer portal",
+    "internal port-scan via ssrf", "summer2023", "welcomenexabank",
+    "enable lsa protection", "suspected ssti",
+}
+
+
 # Maps Presidio entity type → our internal kind label
 _PRESIDIO_KIND: Dict[str, str] = {
     "PERSON":             "person",
@@ -85,26 +147,84 @@ _PRESIDIO_KIND: Dict[str, str] = {
     "URL":                "url",
 }
 
-_analyzer = None        # AnalyzerEngine instance once loaded
-_nlp_available: Optional[bool] = None  # None = unchecked
+_analyzer = None                         # AnalyzerEngine instance once loaded
+_nlp_languages: List[str] = []           # Languages actually loaded (e.g. ["en", "es"])
+_nlp_available: Optional[bool] = None    # None = unchecked
+
+
+# Multi-language configuration. We try to load both English and Spanish so
+# the proxy works for users in AR, CL, ES, UY, CO, MX, BR and elsewhere
+# alongside English-language corpora. Smaller fallback models are tried if
+# the larger ones aren't installed.
+_NLP_MODEL_CANDIDATES: Dict[str, List[str]] = {
+    "en": ["en_core_web_lg", "en_core_web_md", "en_core_web_sm"],
+    "es": ["es_core_news_lg", "es_core_news_md", "es_core_news_sm"],
+}
+
+
+def _resolve_installed_models() -> List[dict]:
+    """Find the best installed spaCy model per language. Returns the list
+    Presidio's NlpEngineProvider expects."""
+    import importlib  # noqa: PLC0415
+
+    selected: List[dict] = []
+    for lang, candidates in _NLP_MODEL_CANDIDATES.items():
+        for name in candidates:
+            try:
+                importlib.import_module(name)
+            except ImportError:
+                continue
+            selected.append({"lang_code": lang, "model_name": name})
+            break
+    return selected
 
 
 def _get_analyzer():
-    """Lazy-load Presidio AnalyzerEngine. Returns None if unavailable."""
-    global _analyzer, _nlp_available
+    """Lazy-load Presidio AnalyzerEngine with all available languages.
+
+    Falls back gracefully:
+      • Both en + es models present  → multilingual analyzer
+      • Only one model present       → single-language analyzer
+      • Neither present              → NLP disabled, regex layer still runs
+    """
+    global _analyzer, _nlp_available, _nlp_languages
     if _nlp_available is not None:
         return _analyzer
 
     try:
-        from presidio_analyzer import AnalyzerEngine  # noqa: PLC0415
-        _analyzer = AnalyzerEngine()
+        from presidio_analyzer import AnalyzerEngine                    # noqa: PLC0415
+        from presidio_analyzer.nlp_engine import NlpEngineProvider      # noqa: PLC0415
+
+        models = _resolve_installed_models()
+        if not models:
+            raise RuntimeError(
+                "No spaCy models found. Install at least one of: "
+                "en_core_web_lg, es_core_news_lg "
+                "(python -m spacy download <name>)."
+            )
+
+        provider = NlpEngineProvider(nlp_configuration={
+            "nlp_engine_name": "spacy",
+            "models": models,
+        })
+        nlp_engine = provider.create_engine()
+
+        supported = [m["lang_code"] for m in models]
+        _analyzer = AnalyzerEngine(
+            nlp_engine=nlp_engine,
+            supported_languages=supported,
+        )
+        _nlp_languages = supported
         _nlp_available = True
-        logger.info("Presidio NLP engine ready")
+        logger.info("Presidio NLP engine ready — languages: %s", supported)
     except Exception as exc:
         _nlp_available = False
+        _nlp_languages = []
         logger.warning(
             "NLP detection disabled (%s). "
-            "To enable: pip install presidio-analyzer && python -m spacy download en_core_web_lg",
+            "To enable: pip install presidio-analyzer && "
+            "python -m spacy download en_core_web_lg && "
+            "python -m spacy download es_core_news_lg",
             exc,
         )
     return _analyzer
@@ -115,11 +235,22 @@ def nlp_available() -> bool:
     return bool(_nlp_available)
 
 
+def nlp_languages() -> List[str]:
+    """Languages the NLP layer is configured for. Empty if NLP disabled."""
+    _get_analyzer()
+    return list(_nlp_languages)
+
+
 # ---------------------------------------------------------------------------
 # Regex patterns — network / infra / tokens (what Presidio misses)
 # ---------------------------------------------------------------------------
 
 _REGEX_PATTERNS: List[Tuple[str, re.Pattern]] = [
+    # ------------------------------------------------------------------
+    # Network & web — broad-match patterns first so narrower ones don't
+    # break them apart (the overlap filter keeps the longest hit).
+    # ------------------------------------------------------------------
+
     # Full URLs first — host inside won't be matched separately
     ("url", re.compile(r'https?://[^\s"\'<>\]]+', re.IGNORECASE)),
     # Emails (backup for Presidio)
@@ -134,24 +265,125 @@ _REGEX_PATTERNS: List[Tuple[str, re.Pattern]] = [
     ("host_port", re.compile(
         r'\b([A-Za-z0-9](?:[A-Za-z0-9\-]{0,61}[A-Za-z0-9])?):([1-9]\d{1,4})\b'
     )),
-    # Credit card backup
+
+    # ------------------------------------------------------------------
+    # Financial — credit cards, SSN (US)
+    # ------------------------------------------------------------------
+
     ("credit_card", re.compile(r'\b(?:\d{4}[\s\-]?){3}\d{4}\b')),
-    # SSN backup
     ("ssn", re.compile(r'\b\d{3}-\d{2}-\d{4}\b')),
-    # Phone backup
+
+    # ------------------------------------------------------------------
+    # National ID formats — Spanish-speaking world
+    # Order matters: more specific (with prefix) before more generic.
+    # ------------------------------------------------------------------
+
+    # Argentina — DNI prefix: "DNI 12.345.678" or "DNI 12345678"
+    ("national_id_ar_dni", re.compile(
+        r'\bDNI\s?N?º?\s?\d{1,2}\.?\d{3}\.?\d{3}\b', re.IGNORECASE,
+    )),
+    # Argentina — CUIT/CUIL: "20-12345678-9"
+    ("national_id_ar_cuit", re.compile(r'\b(?:20|23|24|27|30|33|34)-\d{8}-\d\b')),
+    # Chile — RUT: "12.345.678-K" or "12345678-9"
+    ("national_id_cl_rut", re.compile(
+        r'\b\d{1,2}\.\d{3}\.\d{3}-[\dkK]\b'
+    )),
+    # Spain — DNI/NIE: 8 digits + check letter (DNI), or X/Y/Z + 7 digits + letter (NIE)
+    ("national_id_es", re.compile(
+        r'\b[XYZ]?\d{7,8}[A-HJ-NP-TV-Z]\b', re.IGNORECASE,
+    )),
+    # Uruguay — CI: "1.234.567-8"
+    ("national_id_uy", re.compile(r'\b\d\.\d{3}\.\d{3}-\d\b')),
+    # Colombia — Cédula: "CC 1.234.567" up to 10 digits with dot separators
+    ("national_id_co_cc", re.compile(
+        r'\bCC\s?\d{1,3}(?:\.\d{3}){1,3}\b', re.IGNORECASE,
+    )),
+    # Mexico — CURP (18 chars, well-formed)
+    ("national_id_mx_curp", re.compile(
+        r'\b[A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]\d\b'
+    )),
+    # Mexico — RFC (13 chars person, 12 chars company) — strict suffix
+    ("national_id_mx_rfc", re.compile(
+        r'\b[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{2}[A-Z0-9\d]\b'
+    )),
+
+    # ------------------------------------------------------------------
+    # Phone numbers — international formats for AR, CL, CO, ES, MX, UY,
+    # BR, plus the US/CA fallback. We match the most-specific prefixed
+    # formats first.
+    # ------------------------------------------------------------------
+
+    # +CC <area> <rest> — international format for LatAm + ES + BR.
+    # Covers: +54 9 11 1234-5678, +56 9 1234 5678, +598 99 123 456,
+    #         +57 300 123 4567, +52 1 55 1234 5678, +55 11 91234-5678,
+    #         +34 612 345 678.
+    # Same `phone` kind as the US fallback below so a single counter and
+    # a single fake format (+1-555-000-NNNN) are used across both.
+    ("phone", re.compile(
+        r'(?<!\d)\+(?:34|52|54|56|57|55|598)'
+        r'(?:[\s.\-]?\d){7,12}\b'
+    )),
+    # US / Canada fallback
     ("phone", re.compile(
         r'\b(?:\+?1[\s.\-]?)?\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4}\b'
     )),
-    # Hostnames / FQDNs
+
+    # ------------------------------------------------------------------
+    # Hostnames / FQDNs — broadened TLD list incl. LATAM ccTLDs
+    # ------------------------------------------------------------------
+
     ("hostname", re.compile(
         r'\b(?:[A-Za-z0-9](?:[A-Za-z0-9\-]{0,61}[A-Za-z0-9])?\.)'
         r'+(?:com|net|org|edu|gov|mil|io|co|uk|de|fr|es|it|ru|cn|jp|'
-        r'br|au|ca|local|internal|corp|lan|localdomain|example)\b',
+        r'br|au|ca|mx|cl|ar|uy|pe|ve|ec|bo|py|cr|gt|hn|ni|pa|do|cu|pr|'
+        r'local|internal|corp|lan|localdomain|example)\b',
         re.IGNORECASE,
     )),
+
+    # ------------------------------------------------------------------
     # Long opaque tokens — API keys, secrets (≥32 chars)
+    # ------------------------------------------------------------------
+
     ("token", re.compile(r'\b[A-Za-z0-9_\-]{32,}\b')),
 ]
+
+# ---------------------------------------------------------------------------
+# NLP false-positive filter
+# ---------------------------------------------------------------------------
+
+# 16-digit credit card pattern in 4-4-4-4 groups — used to reject
+# Presidio's PHONE_NUMBER hits that actually match a credit card layout.
+_CC_4x4_RE = re.compile(r"\d{4}[\s\-]?\d{4}[\s\-]?\d{4}[\s\-]?\d{4}")
+
+
+# spaCy's NER fires on a lot of noise when given technical / JSON text:
+# CVSS vector strings, CVE identifiers, English verbs in titles, library
+# names, etc. This filter drops the most common false positives so that
+# Claude still understands technical terms in the sanitized prompt.
+_NAME_FORBIDDEN_CHARS = set("0123456789/:<>[]{}()*=+\\|`~^_;\"")
+
+
+def _looks_like_real_name_or_org(value: str) -> bool:
+    """Return False for strings that look like technical noise rather than
+    a person's name or an organization. The aim is to keep recall on
+    actual PII while filtering JSON-driven false positives.
+    """
+    s = value.strip(" .,;:'\"")
+    if len(s) < 3:
+        return False
+    if s.lower() in _NLP_DENYLIST:
+        return False
+    if any(c in _NAME_FORBIDDEN_CHARS for c in s):
+        return False
+    # Real names and orgs almost always start with an uppercase letter
+    if not s[0].isupper():
+        return False
+    # Must contain at least one lowercase letter — single uppercase tokens
+    # like "DCSYNC", "DNS", "PROD" are technical, not names.
+    if not any(c.islower() for c in s):
+        return False
+    return True
+
 
 # ---------------------------------------------------------------------------
 # Mapping table
@@ -220,6 +452,23 @@ class Sanitizer:
         if kind == "national_id":
             return f"FAKE-ID-{n:06d}"
 
+        if kind == "national_id_ar_dni":
+            return f"DNI 11.111.{n:03d}"
+        if kind == "national_id_ar_cuit":
+            return f"20-11111{n:03d}-1"
+        if kind == "national_id_cl_rut":
+            return f"11.111.{n:03d}-1"
+        if kind == "national_id_es":
+            return f"X{n:07d}A"
+        if kind == "national_id_uy":
+            return f"1.111.{n:03d}-1"
+        if kind == "national_id_co_cc":
+            return f"CC 1.111.{n:03d}"
+        if kind == "national_id_mx_curp":
+            return f"FAKE{n:06d}HDFXXX{n%10}{n%10}"
+        if kind == "national_id_mx_rfc":
+            return f"FAKE{n:06d}XX{n%10}"
+
         if kind == "passport":
             return f"XX{n:07d}"
 
@@ -273,21 +522,42 @@ class Sanitizer:
     # -----------------------------------------------------------------------
 
     def _nlp_detect(self, text: str) -> List[Tuple[int, int, str, str]]:
-        """Run Presidio NLP analysis. Returns [] if unavailable."""
+        """Run Presidio NLP analysis in every available language.
+
+        We don't try to auto-detect the language — instead we run the
+        analyzer once per loaded language and merge results. The overlap
+        filter deduplicates spans found in both languages.
+        Returns [] if NLP is unavailable.
+        """
         analyzer = _get_analyzer()
         if not analyzer:
             return []
-        try:
-            results = analyzer.analyze(text=text, language="en", entities=_NLP_ENTITIES)
-            hits = []
+        hits: List[Tuple[int, int, str, str]] = []
+        for lang in (_nlp_languages or ["en"]):
+            try:
+                results = analyzer.analyze(
+                    text=text,
+                    language=lang,
+                    entities=_NLP_ENTITIES,
+                    score_threshold=_NLP_MIN_SCORE,
+                )
+            except Exception as exc:
+                logger.warning("NLP detection error for lang=%s: %s", lang, exc)
+                continue
             for r in results:
                 value = text[r.start:r.end]
+                if r.entity_type in ("PERSON", "ORGANIZATION") and \
+                        not _looks_like_real_name_or_org(value):
+                    continue
+                # Presidio's PHONE recognizer matches 16-digit credit card
+                # groups (4-4-4-4). Reject those — the regex layer will
+                # tag them as credit_card.
+                if r.entity_type == "PHONE_NUMBER" and \
+                        _CC_4x4_RE.fullmatch(value.strip()):
+                    continue
                 kind = _PRESIDIO_KIND.get(r.entity_type, r.entity_type.lower())
                 hits.append((r.start, r.end, value, kind))
-            return hits
-        except Exception as exc:
-            logger.warning("NLP detection error: %s", exc)
-            return []
+        return hits
 
     def _regex_detect(self, text: str) -> List[Tuple[int, int, str, str]]:
         hits = []

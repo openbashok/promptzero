@@ -112,14 +112,22 @@ CLAUDE'S RESPONSE (synthetic)        YOU RECEIVE (real data restored)
 | URL | `https://api.corp.com/v2` → `https://localhost.localdomain.2/v2` | Regex |
 | host:port | `db.internal:5432` → `localhost.localdomain.3:5432` | Regex |
 | Email | `john@corp.com` → `user001@fakecorp.local` | Regex + NLP |
-| Phone | `+54 11 4444-5555` → `+1-555-000-0001` | Regex + NLP |
-| Person name | `John Smith` → `Alice Harrington` | **NLP (spaCy)** |
-| Organization | `Acme Corp S.A.` → `Globex Industries` | **NLP (spaCy)** |
-| National ID / DNI | `28.456.123` → `FAKE-ID-000001` | **NLP (Presidio)** |
+| Phone (US/CA) | `+1-555-123-4567` → `+1-555-000-0001` | Regex + NLP |
+| Phone (LatAm + ES) | `+54 11 4444-5555`, `+56 9 1234 5678`, `+34 612 345 678`, `+52 55 1234 5678`, `+57 300 123 4567`, `+598 99 123 456` → `+1-555-000-0001` | **Regex (LatAm/ES)** |
+| Person name | `John Smith`, `María Fernández` | **NLP (spaCy en+es)** |
+| Organization | `Acme Corp S.A.`, `Nexabank Financial S.A.` | **NLP (spaCy en+es)** |
+| Argentina DNI | `DNI 28.456.123` → `DNI 11.111.001` | **Regex (AR)** |
+| Argentina CUIT/CUIL | `20-12345678-9` → `20-11111001-1` | **Regex (AR)** |
+| Chile RUT | `12.345.678-K` → `11.111.001-1` | **Regex (CL)** |
+| Spain DNI/NIE | `12345678A`, `X1234567A` → `X0000001A` | **Regex (ES) + NLP** |
+| Uruguay CI | `1.234.567-8` → `1.111.001-1` | **Regex (UY)** |
+| Colombia CC | `CC 1.234.567` → `CC 1.111.001` | **Regex (CO)** |
+| Mexico CURP | `AAAA000000HAAAAA00` → `FAKE000001HDFXXX11` | **Regex (MX)** |
+| Mexico RFC | `AAAA000000AAA` → `FAKE000001XX1` | **Regex (MX)** |
 | Passport | `AAB123456` → `XX0000001` | **NLP (Presidio)** |
 | SSN | `123-45-6789` → `000-00-0001` | Regex + NLP |
 | Credit card | `4111 1111 1111 1234` → `4111-1111-1111-0001` | Regex + NLP |
-| IBAN | `GB29NWBK60161331926819` → `FAKEIBAN000...` | NLP |
+| IBAN | `GB29NWBK60161331926819`, `AR1500011110000…` → `FAKEIBAN000…` | NLP |
 | API key / Token | `sk-ant-api03-xxxxxx...` → `FAKE_TOKEN_0001_xxxxxxxx` | Regex |
 
 > **Pentesting mode:** IPs map to `127.0.0.x` and hostnames to `localhost.localdomain.x` —
@@ -148,10 +156,16 @@ promptzero/
 ```
 Text input
     │
-    ├─▶ [ NLP Layer — Presidio + spaCy ]
+    ├─▶ [ NLP Layer — Presidio + spaCy (en + es) ]
     │     PERSON, ORGANIZATION, PHONE, EMAIL,
     │     CREDIT_CARD, IBAN, SSN, PASSPORT,
-    │     NATIONAL_ID, URL, IP_ADDRESS
+    │     NATIONAL_ID (ES_NIF, NRP), URL, IP_ADDRESS
+    │
+    ├─▶ [ Regex Layer — country-specific PII ]
+    │     AR: DNI, CUIT/CUIL          CL: RUT
+    │     ES: DNI/NIE                 UY: CI
+    │     CO: Cédula (CC)             MX: CURP, RFC
+    │     Phones: +34 +52 +54 +55 +56 +57 +598
     │
     ├─▶ [ Regex Layer — network & infra ]
     │     IPv4, IPv6, hostnames, host:port,
@@ -190,7 +204,7 @@ admin@acme.com      ←──────▶  user001@fakecorp.local
 git clone https://github.com/openbash/promptzero
 cd promptzero
 
-# Setup (installs deps + downloads spaCy NLP model)
+# Setup (installs deps + downloads spaCy NLP models en + es)
 ./setup.sh
 
 # Configure
@@ -202,8 +216,10 @@ python main.py
 # Listening on http://localhost:8000
 ```
 
-> Use `./setup.sh small` for a lighter spaCy model (~12 MB vs ~560 MB).
-> The small model is faster but less accurate for person/org detection.
+> Setup downloads spaCy models for **English + Spanish** by default
+> (≈560 MB each — covers AR, CL, CO, ES, MX, PE, UY and English text).
+> Use `./setup.sh medium` (~40 MB) or `./setup.sh small` (~12 MB) for
+> lighter installs, or `./setup.sh en-only` if you only process English.
 
 ---
 
