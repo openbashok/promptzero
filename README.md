@@ -318,6 +318,59 @@ watch -n 1 'curl -s http://localhost:8000/health'
 curl -s http://localhost:8000/sessions/<id>/mappings | jq
 ```
 
+### Inspecting upstream traffic with Burp Suite (or mitmproxy)
+
+Want to *prove* nothing sensitive leaves your machine? Route PromptZero's
+upstream connection (PromptZero → `api.anthropic.com`) through Burp and
+inspect every byte. Two env vars in `.env`:
+
+```bash
+# Send PromptZero → api.anthropic.com traffic through Burp
+UPSTREAM_PROXY=http://127.0.0.1:8080
+
+# Burp does TLS interception with its own CA — either trust it
+# explicitly (recommended):
+UPSTREAM_CA_BUNDLE=/Users/you/burp-ca.pem
+# …or skip verification for a quick demo (insecure):
+UPSTREAM_VERIFY=false
+```
+
+Steps:
+
+1. **Export Burp's CA cert as PEM**
+   `Burp → Proxy → Settings → Import / export CA certificate → "Certificate in PEM format"`
+   Save it as `~/burp-ca.pem`.
+
+2. **Enable Burp's proxy listener** on `127.0.0.1:8080` (default).
+
+3. **Set the env vars in `.env`** (snippet above) and restart `python main.py`.
+
+4. **Confirm via /health** that the proxy picked up the config:
+   ```bash
+   curl -s http://localhost:8000/health | jq
+   # → "upstream_proxy": "http://127.0.0.1:8080"
+   #   "upstream_verify": "/Users/you/burp-ca.pem"
+   ```
+
+5. **Run your client** as usual (`claude`, `python demo_claude.py`, `curl`…).
+
+6. **Inspect in Burp** — open the HTTP history. Every request to
+   `api.anthropic.com/v1/messages` shows the **sanitized** body. Filter
+   the history for any real value from your dataset (`nexabank`, `DNI`,
+   your real IP) — the result is empty. That's the proof.
+
+```
+┌─────────┐  HTTP   ┌────────────┐  HTTPS   ┌──────────┐  HTTPS  ┌─────────────────┐
+│ Claude  │────────▶│ PromptZero │─────────▶│   Burp   │────────▶│ api.anthropic   │
+│  CLI    │  clear  │   :8000    │  TLS     │  :8080   │  TLS    │     .com        │
+└─────────┘         │ sanitize   │          │  MITM    │         └─────────────────┘
+                    │ desanitize │          │ inspect  │
+                    └────────────┘          └──────────┘
+```
+
+`mitmproxy` works the same way — set `UPSTREAM_PROXY=http://127.0.0.1:8081`
+and `UPSTREAM_CA_BUNDLE=~/.mitmproxy/mitmproxy-ca-cert.pem`.
+
 ---
 
 ## Examples

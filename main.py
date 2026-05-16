@@ -38,6 +38,35 @@ CLAUDE_BASE_URL = "https://api.anthropic.com"
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 PORT = int(os.getenv("PORT", "8000"))
 
+# Upstream proxy (for inspecting what PromptZero sends to api.anthropic.com).
+# Typical use: route through Burp Suite at http://127.0.0.1:8080 to verify
+# during a demo that no real PII leaves the machine. Optional.
+UPSTREAM_PROXY = os.getenv("UPSTREAM_PROXY", "").strip() or None
+# When true, skip TLS verification on the upstream hop. Useful when the
+# upstream proxy (Burp / mitmproxy / Charles) does TLS interception with
+# its own CA that you haven't imported. Default: verify.
+UPSTREAM_VERIFY = os.getenv("UPSTREAM_VERIFY", "true").lower() not in (
+    "0", "false", "no", "off",
+)
+# Optional explicit CA bundle path for the upstream hop (lets you keep
+# verification on while trusting Burp's exported CA cert).
+UPSTREAM_CA_BUNDLE = os.getenv("UPSTREAM_CA_BUNDLE", "").strip() or None
+
+
+def _httpx_client(**extra) -> httpx.AsyncClient:
+    """Build an httpx.AsyncClient pre-wired with the configured upstream
+    proxy / TLS settings. Used everywhere we talk to api.anthropic.com so
+    inspection through Burp is a single env-var flip away."""
+    kwargs = {"timeout": 120.0}
+    if UPSTREAM_PROXY:
+        kwargs["proxy"] = UPSTREAM_PROXY
+    if UPSTREAM_CA_BUNDLE:
+        kwargs["verify"] = UPSTREAM_CA_BUNDLE
+    elif not UPSTREAM_VERIFY:
+        kwargs["verify"] = False
+    kwargs.update(extra)
+    return httpx.AsyncClient(**kwargs)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -70,7 +99,16 @@ def _get_session(session_id: str) -> Sanitizer:
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "active_sessions": len(_sessions), "nlp_enabled": nlp_available()}
+    return {
+        "status": "ok",
+        "active_sessions": len(_sessions),
+        "nlp_enabled": nlp_available(),
+        "upstream_proxy": UPSTREAM_PROXY,
+        "upstream_verify": (
+            UPSTREAM_CA_BUNDLE if UPSTREAM_CA_BUNDLE
+            else (True if UPSTREAM_VERIFY else False)
+        ),
+    }
 
 
 @app.get("/sessions/{session_id}/mappings")
@@ -109,7 +147,7 @@ async def _stream_desanitized(
     client must outlive the route function).
     """
     buffer = ""
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    async with _httpx_client() as client:
         async with client.stream("POST", url, json=payload, headers=headers) as resp:
             async for chunk in resp.aiter_text():
                 buffer += chunk
@@ -171,7 +209,7 @@ async def proxy_messages(
         )
 
     # Non-streaming
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    async with _httpx_client() as client:
         resp = await client.post(target_url, json=clean_body, headers=upstream_headers)
         response_data = resp.json()
         desanitized = sanitizer.desanitize_response(response_data)
@@ -213,7 +251,7 @@ async def proxy_count_tokens(
     if anthropic_beta:
         upstream_headers["anthropic-beta"] = anthropic_beta
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with _httpx_client(timeout=60.0) as client:
         resp = await client.post(
             f"{CLAUDE_BASE_URL}/v1/messages/count_tokens",
             json=clean_body,
@@ -262,7 +300,7 @@ async def passthrough(request: Request, path: str):
 
     body_bytes = await request.body()
 
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    async with _httpx_client() as client:
         resp = await client.request(
             method=request.method,
             url=target_url,
