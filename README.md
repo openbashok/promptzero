@@ -283,6 +283,41 @@ GET  /sessions/{session_id}/mappings
 DELETE /sessions/{session_id}
 ```
 
+### Routing the Claude Code CLI through PromptZero
+
+The proxy is a drop-in replacement for `api.anthropic.com`, so the Claude Code
+CLI works through it with a single env var:
+
+```bash
+# Start PromptZero (terminal 1)
+python main.py
+
+# Run Claude Code via the proxy (terminal 2)
+export ANTHROPIC_BASE_URL=http://localhost:8000
+claude
+
+# Every prompt typed in the CLI is now sanitized before reaching Claude,
+# and Claude's responses are desanitized before reaching your terminal.
+```
+
+What the proxy handles for the CLI:
+
+| Route | Behaviour |
+|---|---|
+| `POST /v1/messages`             | Sanitized → forwarded. Response desanitized. Streaming OK. |
+| `POST /v1/messages/count_tokens`| Sanitized so token counts reflect the sanitized prompt.    |
+| Anything else under `/v1/*`     | Forwarded unchanged (`models`, `organizations`, `files`, `batches`, …) |
+
+Verify Claude Code is going through the proxy:
+
+```bash
+# In a third terminal — watch active sessions grow as you use the CLI
+watch -n 1 'curl -s http://localhost:8000/health'
+
+# Inspect what got mapped in the last session
+curl -s http://localhost:8000/sessions/<id>/mappings | jq
+```
+
 ---
 
 ## Examples
@@ -296,11 +331,16 @@ incident response, support chat) plus two demo scripts.
 ```bash
 cd examples/poc
 
-# Demo standalone — no API call, prints original / sanitized / desanitized
+# Standalone — no API call, prints original / sanitized / desanitized
 # + the full real↔fake mapping table.
 python demo_local.py
 python demo_local.py data/01_personal_records.json
-python demo_local.py data/03_injection_catalog.json --max-preview 5000
+
+# Visual HTML report — best for video demos. Side-by-side highlights,
+# colour by category, hover-to-link real↔fake, mapping table.
+python demo_html.py --open
+python demo_html.py --with-claude --task triage \
+    --dataset data/04_incident_response.json --out ir.html --open
 
 # End-to-end against the real Claude API (proxy must be running)
 python demo_claude.py
