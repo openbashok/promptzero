@@ -141,10 +141,10 @@ del cliente, en 4 líneas.
 {
   "messages": [{
     "content": "Acabo de terminar un pentest interno en Acme Corp.
-                Encontré un RCE pre-auth en localhost.localdomain.1
+                Encontré un RCE pre-auth en alpha.localhost
                 (127.0.0.13) explotando CVE-2024-21762.
                 Conseguí admin:Nexabank2024! y pivoteé a
-                localhost.localdomain.2 (127.0.0.5).
+                bravo.localhost (127.0.0.5).
                 Ayudame a redactar el correo de comunicación a
                 Alice Harrington (user001@fakecorp.local), CISO
                 del cliente, en 4 líneas."
@@ -154,7 +154,7 @@ del cliente, en 4 líneas.
 
 **Narración mientras señalás:**
 > "Anthropic recibió **Acme Corp**, no Nexabank.
-> **localhost.localdomain.1**, no vpn.nexabank.com.
+> **alpha.localhost**, no vpn.nexabank.com.
 > **Alice Harrington**, no Roberto Silva.
 > **user001@fakecorp.local**, no el email real."
 

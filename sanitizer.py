@@ -51,6 +51,34 @@ _FAKE_ORGS = [
     "Cyberdyne Systems",
 ]
 
+# Pool of visually distinct hostname stems. Each gets `.localhost` appended
+# so the synthetic value still resolves to loopback (RFC 6761) — semantically
+# "this is internal lab infrastructure" — but each individual host has a
+# unique, easy-to-distinguish name. Avoids the previous failure mode where
+# localhost.localdomain.1, localhost.localdomain.2, … were so similar the
+# model conflated them or interpolated suffixes like "nexabank.local1".
+_FAKE_HOST_STEMS = [
+    # NATO phonetic alphabet (26)
+    "alpha", "bravo", "charlie", "delta", "echo", "foxtrot",
+    "golf", "hotel", "india", "juliet", "kilo", "lima",
+    "mike", "november", "oscar", "papa", "quebec", "romeo",
+    "sierra", "tango", "uniform", "victor", "whiskey", "xray",
+    "yankee", "zulu",
+    # Birds of prey (8)
+    "falcon", "eagle", "hawk", "osprey", "kestrel", "raven", "owl", "harrier",
+    # Colors (8)
+    "crimson", "azure", "emerald", "amber", "indigo", "violet", "sage", "ochre",
+]
+
+
+def _fake_host_stem(n: int) -> str:
+    """Return the n-th distinct hostname stem. Cycles with a numeric suffix
+    once the pool is exhausted (e.g. alpha, bravo, …, zulu, alpha2, …)."""
+    idx = (n - 1) % len(_FAKE_HOST_STEMS)
+    cycle = (n - 1) // len(_FAKE_HOST_STEMS)
+    base = _FAKE_HOST_STEMS[idx]
+    return base if cycle == 0 else f"{base}{cycle + 1}"
+
 # ---------------------------------------------------------------------------
 # Presidio — lazy global analyzer
 # ---------------------------------------------------------------------------
@@ -454,6 +482,27 @@ class Sanitizer:
     # -----------------------------------------------------------------------
 
     def _make_fake(self, kind: str, real: str) -> str:
+        # hostname / host_port / url share a single counter for stem
+        # selection so the same .localhost stem is never reused across
+        # kinds for different real values. The per-kind counter is still
+        # bumped (used for stats display).
+        if kind in ("hostname", "host_port", "url"):
+            self.table.next_count(kind)
+            host_n = self.table.next_count("_host_pool")
+            stem = _fake_host_stem(host_n)
+            if kind == "hostname":
+                return f"{stem}.localhost"
+            if kind == "host_port":
+                m = re.match(r'^([^:]+):(\d+)$', real)
+                port = m.group(2) if m else "0"
+                return f"{stem}.localhost:{port}"
+            # url
+            m = re.match(r'(https?://)([^/?#]+)(.*)', real, re.IGNORECASE)
+            if m:
+                scheme, _host, rest = m.groups()
+                return f"{scheme}{stem}.localhost{rest}"
+            return f"{stem}.localhost"
+
         n = self.table.next_count(kind)
 
         if kind == "person":
@@ -500,10 +549,7 @@ class Sanitizer:
         if kind == "ipv6":
             return "::1"
 
-        if kind == "host_port":
-            m = re.match(r'^([^:]+):(\d+)$', real)
-            port = m.group(2) if m else "0"
-            return f"localhost.localdomain.{n}:{port}"
+        # host_port handled in the shared block above
 
         if kind == "email":
             return f"user{n:03d}@fakecorp.local"
@@ -517,15 +563,7 @@ class Sanitizer:
         if kind == "credit_card":
             return f"4111-1111-1111-{n:04d}"
 
-        if kind == "hostname":
-            return f"localhost.localdomain.{n}"
-
-        if kind == "url":
-            m = re.match(r'(https?://)([^/?#]+)(.*)', real, re.IGNORECASE)
-            if m:
-                scheme, _host, rest = m.groups()
-                return f"{scheme}localhost.localdomain.{n}{rest}"
-            return f"http://localhost.localdomain.{n}/"
+        # hostname and url handled in the shared block above
 
         if kind == "token":
             return f"FAKE_TOKEN_{n:04d}_{'x' * 8}"

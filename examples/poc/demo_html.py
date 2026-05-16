@@ -171,26 +171,42 @@ def _render_with_spans(text: str, spans: List[dict]) -> str:
 # Optional Claude call
 # ---------------------------------------------------------------------------
 
+# Strict identifier-preservation clause appended to every task prompt.
+# Critical for accurate desanitization: if Claude paraphrases or recombines
+# synthetic values (e.g. inventing "nexabank.local1" from "nexabank.local" +
+# "localhost.localdomain.1"), the proxy can't restore them back to real
+# values because there's no exact mapping match.
+_PRESERVE_CLAUSE = (
+    "\n\nCRITICAL: Preserve every hostname, IP address, identifier, port "
+    "number, CVE id, email, and timestamp EXACTLY as it appears in the "
+    "input. Do NOT abbreviate, shorten, paraphrase, recombine, or invent "
+    "any of these values. Do NOT extract or echo substrings (e.g. if you "
+    "see 'alpha.localhost' do not write 'alpha' or '.localhost' alone). "
+    "Treat each identifier as an opaque token."
+)
+
+
 TASK_PROMPTS = {
     "technical": (
         "You are a senior penetration testing consultant. From the following "
         "input, produce a concise technical analysis in Markdown (≤500 words) "
         "covering the top 3 findings, business impact, and recommended "
-        "remediation. Preserve hostnames, IPs, identifiers as they appear."
+        "remediation." + _PRESERVE_CLAUSE
     ),
     "executive": (
         "Write a board-level executive summary from the following input. "
         "Markdown, ≤300 words. Top 3 business impacts, top 3 recommendations. "
-        "Avoid technical jargon."
+        "Avoid technical jargon." + _PRESERVE_CLAUSE
     ),
     "summary": (
-        "Summarize the following document in 5–8 bullet points. Preserve all "
-        "names, organizations, identifiers and figures exactly as they appear."
+        "Summarize the following document in 5–8 bullet points." +
+        _PRESERVE_CLAUSE
     ),
     "triage": (
         "You are a SOC tier-2 analyst. Triage the following incident: rate "
         "the severity, list the indicators of compromise, propose the next 5 "
-        "containment steps in priority order, name stakeholders to notify."
+        "containment steps in priority order, name stakeholders to notify." +
+        _PRESERVE_CLAUSE
     ),
 }
 

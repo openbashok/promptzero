@@ -55,27 +55,42 @@ MODEL      = os.getenv("MODEL", "claude-opus-4-6")
 MAX_TOKENS = int(os.getenv("MAX_TOKENS", "2048"))
 
 
+# Strict identifier-preservation clause appended to every task prompt.
+# Prevents the model from recombining or paraphrasing synthetic values
+# (which would defeat the desanitization round-trip).
+_PRESERVE_CLAUSE = (
+    "\n\nCRITICAL: Preserve every hostname, IP address, identifier, port "
+    "number, CVE id, email, and timestamp EXACTLY as it appears in the "
+    "input. Do NOT abbreviate, shorten, paraphrase, recombine, or invent "
+    "any of these values. Do NOT extract or echo substrings (e.g. if you "
+    "see 'alpha.localhost' do not write 'alpha' or '.localhost' alone). "
+    "Treat each identifier as an opaque token."
+)
+
+
 TASK_PROMPTS = {
     "technical": (
         "You are a senior penetration testing consultant. Given the following structured "
         "input, produce a CONCISE technical summary in Markdown (≤500 words) covering: "
-        "the top 3 findings, their business impact, and a recommended remediation plan. "
-        "Preserve hostnames, IPs, and identifiers exactly as they appear in the input."
+        "the top 3 findings, their business impact, and a recommended remediation plan."
+        + _PRESERVE_CLAUSE
     ),
     "executive": (
         "You are writing a board-level executive summary. From the following input, "
         "produce a concise Markdown brief (≤300 words) describing the overall risk, "
         "the top 3 business impacts, and the top 3 recommendations. "
         "Avoid technical jargon, IP addresses, and CVE numbers."
+        + _PRESERVE_CLAUSE
     ),
     "summary": (
-        "Summarize the following document in 5–8 bullet points. Preserve all names, "
-        "organizations, identifiers, and figures exactly as they appear in the input."
+        "Summarize the following document in 5–8 bullet points."
+        + _PRESERVE_CLAUSE
     ),
     "triage": (
         "You are a SOC tier-2 analyst. Triage the following incident report: rate the "
         "severity, list the indicators of compromise, propose the next 5 containment "
         "steps in priority order, and identify which stakeholders to notify."
+        + _PRESERVE_CLAUSE
     ),
 }
 

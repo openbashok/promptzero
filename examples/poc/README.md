@@ -148,7 +148,7 @@ Salida (todo OK):
   ✓ PASS  Upstream call succeeded — this request should be visible in Burp now.
 ━━━ 5. End-to-end: a real /v1/messages through PromptZero works ━━━
   ✓ PASS  Claude responded: 'OK'
-  ✓ PASS  Session mapped 3 value(s) — db-prod.nexabank.local → localhost.localdomain.1
+  ✓ PASS  Session mapped 3 value(s) — db-prod.nexabank.local → alpha.localhost
 ```
 
 Falla típica más común — olvidaste reiniciar el proxy después de editar `.env`:
