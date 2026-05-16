@@ -390,22 +390,32 @@ def _looks_like_real_name_or_org(value: str) -> bool:
 # ---------------------------------------------------------------------------
 
 class MappingTable:
-    """Bidirectional real ↔ fake, scoped to one session."""
+    """Bidirectional real ↔ fake, scoped to one session.
+
+    Also tracks the detection kind (person, org, ipv4, …) per real value
+    so callers can colour or group mappings — used by demo_html.py.
+    """
 
     def __init__(self):
         self._r2f: Dict[str, str] = {}
         self._f2r: Dict[str, str] = {}
+        self._kinds: Dict[str, str] = {}
         self._counters: Dict[str, int] = {}
 
-    def register(self, real: str, fake: str) -> None:
+    def register(self, real: str, fake: str, kind: Optional[str] = None) -> None:
         self._r2f[real] = fake
         self._f2r[fake] = real
+        if kind:
+            self._kinds[real] = kind
 
     def get_fake(self, real: str) -> Optional[str]:
         return self._r2f.get(real)
 
     def get_real(self, fake: str) -> Optional[str]:
         return self._f2r.get(fake)
+
+    def get_kind(self, real: str) -> Optional[str]:
+        return self._kinds.get(real)
 
     def next_count(self, kind: str) -> int:
         self._counters[kind] = self._counters.get(kind, 0) + 1
@@ -415,12 +425,17 @@ class MappingTable:
     def fake_to_real(self) -> Dict[str, str]:
         return self._f2r
 
+    @property
+    def kinds(self) -> Dict[str, str]:
+        return self._kinds
+
     def snapshot(self) -> dict:
         return {
             "nlp_enabled": nlp_available(),
             "total_entries": len(self._r2f),
             "counters_by_type": dict(self._counters),
             "mappings": dict(self._r2f),
+            "kinds": dict(self._kinds),
         }
 
 
@@ -600,7 +615,7 @@ class Sanitizer:
             fake = self.table.get_fake(value)
             if fake is None:
                 fake = self._make_fake(kind, value)
-                self.table.register(value, fake)
+                self.table.register(value, fake, kind)
             result = result[:start] + fake + result[end:]
 
         return result

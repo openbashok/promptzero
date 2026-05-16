@@ -89,6 +89,42 @@ sanitización en texto conversacional libre.
 
 ## Scripts
 
+### `demo_html.py` — Reporte visual (ideal para videos y pitches)
+
+Genera un archivo HTML self-contained que abrís en cualquier browser. Muestra
+con highlights coloreados:
+
+- panel izquierdo: dataset **original** con cada PII marcada en color
+- panel derecho: dataset **sanitizado** (exactamente lo que Claude recibe), con
+  los reemplazos en el mismo color
+- chips de resumen por categoría (`person · 6`, `org · 5`, `ipv4 · 14`, …)
+- tabla completa real ↔ ficticio, agrupada por categoría
+- opcionalmente: sección end-to-end con Claude (response cruda con valores
+  sintéticos y response desanonimizada)
+
+Al hacer hover sobre cualquier valor resaltado se ilumina su contraparte en el
+otro panel. Es lo más impactante para grabar a pantalla.
+
+```bash
+# Reporte por defecto (pentest engagement)
+python demo_html.py
+open report.html       # macOS: abre el archivo
+
+# Otro dataset, con --open para abrirlo solo al terminar
+python demo_html.py --dataset data/01_personal_records.json --open
+
+# End-to-end con Claude (necesita el proxy corriendo + API key)
+python demo_html.py --with-claude --task triage \
+  --dataset data/04_incident_response.json --out ir.html
+
+# Chat de soporte en español → summary
+python demo_html.py --dataset data/05_customer_support_chat.json \
+  --with-claude --task summary --out chat.html --open
+```
+
+El HTML resultante (~50–200 KB) no depende de ningún CDN ni recurso externo —
+se renderiza igual con la máquina offline.
+
 ### `demo_local.py` — Demo standalone, sin tocar Claude
 
 Corre el `Sanitizer` localmente y muestra las 3 etapas en pantalla:
