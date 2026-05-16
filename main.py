@@ -222,6 +222,11 @@ async def proxy_messages(
         upstream_headers["anthropic-beta"] = anthropic_beta
 
     target_url = f"{CLAUDE_BASE_URL}/v1/messages"
+    # Preserve any query string the caller sent (e.g. ?beta=true from Claude
+    # Code) — Anthropic uses these for feature gating.
+    if request.url.query:
+        target_url = f"{target_url}?{request.url.query}"
+
     streaming = body.get("stream", False)
 
     if streaming:
@@ -235,14 +240,50 @@ async def proxy_messages(
     # Non-streaming
     async with _httpx_client() as client:
         resp = await client.post(target_url, json=clean_body, headers=upstream_headers)
-        response_data = resp.json()
-        desanitized = sanitizer.desanitize_response(response_data)
 
+    # If the upstream replied with something other than JSON — typically an
+    # intercepting proxy returning an HTML error page, or a 502/504 from
+    # Cloudflare — surface it verbatim instead of crashing on resp.json().
+    content_type = resp.headers.get("content-type", "")
+    if not content_type.startswith("application/json"):
+        snippet = resp.text[:500].replace("\n", " ")
         return JSONResponse(
-            content=desanitized,
-            status_code=resp.status_code,
+            status_code=502,
+            content={
+                "type": "upstream_non_json",
+                "upstream_status": resp.status_code,
+                "upstream_content_type": content_type,
+                "upstream_body_excerpt": snippet,
+                "hint": (
+                    "If you are routing through Burp, check that 'Intercept' "
+                    "is OFF (Proxy → Intercept) and that the request shows up "
+                    "in Proxy → HTTP history with a 200 response from "
+                    "api.anthropic.com."
+                ),
+            },
             headers={"x-session-id": session_id},
         )
+
+    try:
+        response_data = resp.json()
+    except ValueError as exc:
+        return JSONResponse(
+            status_code=502,
+            content={
+                "type": "upstream_invalid_json",
+                "upstream_status": resp.status_code,
+                "error": str(exc),
+                "upstream_body_excerpt": resp.text[:500],
+            },
+            headers={"x-session-id": session_id},
+        )
+
+    desanitized = sanitizer.desanitize_response(response_data)
+    return JSONResponse(
+        content=desanitized,
+        status_code=resp.status_code,
+        headers={"x-session-id": session_id},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -281,11 +322,22 @@ async def proxy_count_tokens(
             json=clean_body,
             headers=upstream_headers,
         )
+
+    if not resp.headers.get("content-type", "").startswith("application/json"):
         return JSONResponse(
-            content=resp.json(),
-            status_code=resp.status_code,
+            status_code=502,
+            content={
+                "type": "upstream_non_json",
+                "upstream_status": resp.status_code,
+                "upstream_body_excerpt": resp.text[:500],
+            },
             headers={"x-session-id": session_id},
         )
+    return JSONResponse(
+        content=resp.json(),
+        status_code=resp.status_code,
+        headers={"x-session-id": session_id},
+    )
 
 
 # ---------------------------------------------------------------------------
