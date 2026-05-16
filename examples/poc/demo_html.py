@@ -39,6 +39,14 @@ from typing import List, Tuple
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
+# Load the repo-root .env so ANTHROPIC_API_KEY is available when the user
+# runs --with-claude. Done before any os.getenv() lookups.
+try:
+    from dotenv import load_dotenv  # noqa: E402
+    load_dotenv(ROOT / ".env")
+except ImportError:
+    pass  # dotenv is in requirements.txt, but don't hard-fail if missing
+
 from sanitizer import Sanitizer, nlp_available, nlp_languages  # noqa: E402
 
 
