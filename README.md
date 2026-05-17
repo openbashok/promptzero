@@ -286,9 +286,10 @@ GET  /sessions/{session_id}/mappings
 DELETE /sessions/{session_id}
 ```
 
-The proxy terminal also prints **one colored trace line per request**,
-showing exactly what got sanitized — ideal for split-screen with Claude
-Code so a viewer sees PII getting redacted in real time:
+The proxy terminal prints **one colored trace line per request**, showing
+exactly what got sanitized — useful when running Claude Code (or any
+client) alongside it so you can verify in real time which PII was masked
+on each turn:
 
 ```
 [trace] POST /v1/messages     session=poc-pent  +4 spans (total 4: 1 phone, 1 email, 1 ipv4, 1 url)  in= 197B out= 494B  200 2012ms
@@ -296,15 +297,13 @@ Code so a viewer sees PII getting redacted in real time:
 [trace] GET   /v1/models           (passthrough, no sanitization)  200  367ms
 ```
 
-For cumulative dashboards `/stats` is designed for live monitoring during
-demos — pop a terminal with:
+For cumulative metrics, hit `/stats`:
 
 ```bash
 watch -n 1 'curl -s localhost:8000/stats | jq'
 ```
 
-…and watch the counters tick up every time you hit Claude through the
-proxy. Example payload:
+Example payload:
 
 ```json
 {
@@ -427,7 +426,8 @@ and `UPSTREAM_CA_BUNDLE=~/.mitmproxy/mitmproxy-ca-cert.pem`.
 
 The fastest way to *see* PromptZero in action — five fictitious datasets (personal
 data, full pentest engagement with HTTP req/res + payloads, injection catalog,
-incident response, support chat) plus two demo scripts.
+incident response, support chat) and three demo scripts (local sanitizer,
+visual HTML report, end-to-end against Claude).
 
 ```bash
 cd examples/poc
@@ -437,8 +437,8 @@ cd examples/poc
 python demo_local.py
 python demo_local.py data/01_personal_records.json
 
-# Visual HTML report — best for video demos. Side-by-side highlights,
-# colour by category, hover-to-link real↔fake, mapping table.
+# Visual HTML report — side-by-side original vs sanitized with each
+# PII span colour-coded, hover-to-link mappings, summary table.
 python demo_html.py --open
 python demo_html.py --with-claude --task triage \
     --dataset data/04_incident_response.json --out ir.html --open
@@ -448,8 +448,8 @@ python demo_claude.py
 python demo_claude.py --dataset data/04_incident_response.json --task triage
 ```
 
-See [`examples/poc/README.md`](examples/poc/README.md) for the full dataset catalog,
-script options, and audience-facing talking points.
+See [`examples/poc/README.md`](examples/poc/README.md) for the full dataset
+catalog and script options.
 
 ### Document Summary
 
@@ -652,8 +652,6 @@ promptzero/
 ├── main.py          ← Proxy FastAPI (drop-in para api.anthropic.com)
 ├── sanitizer.py     ← Motor de detección: NLP (Presidio+spaCy) + Regex
 ├── setup.sh         ← Setup en un comando
-├── run_demo.sh      ← Orquestador del demo de 90 segundos
-├── DEMO_SCRIPT.md   ← Storyboard del video
 ├── requirements.txt
 ├── .env.example
 └── examples/
@@ -784,7 +782,7 @@ GET    /sessions/{session_id}/mappings  # tabla real↔ficticio (debug)
 DELETE /sessions/{session_id}           # resetea la tabla de la sesión
 ```
 
-`/stats` está pensado para overlay en demos en vivo:
+Para métricas acumuladas en vivo:
 
 ```bash
 watch -n 1 'curl -s localhost:8000/stats | jq'
@@ -805,16 +803,16 @@ Te tira algo así, actualizándose cada segundo:
 }
 ```
 
-Además la terminal del proxy imprime **una línea coloreada por request**:
+Además la terminal del proxy imprime **una línea coloreada por request**
+mostrando exactamente lo que se sanitizó, útil para verificar en tiempo
+real qué PII se enmascaró en cada turno cuando corrés Claude Code (o
+cualquier cliente) al lado:
 
 ```
 [trace] POST /v1/messages     session=poc-pent  +4 spans (total 4: 1 phone, 1 email, 1 ipv4, 1 url)  in= 197B out= 494B  200 2012ms
 [trace] POST /v1/messages     session=poc-pent  +3 spans (total 7: 2 ipv4, 1 person, 1 hostname)  in= 185B out= 697B  200 1273ms
 [trace] GET   /v1/models           (passthrough, no sanitization)  200  367ms
 ```
-
-Perfecto para split-screen con Claude Code o cualquier cliente: cada turno
-ves exactamente cuánta PII se enmascaró en esa request.
 
 ---
 
@@ -925,19 +923,6 @@ python report.py findings.json --mode executive --lang es --out ejecutivo.md
 python report.py findings.json --mode remediation --out fixes.md
 python report.py findings.json --protect "P@ssw0rd1" "Verano2024!"   # mascarar passwords cortas
 ```
-
----
-
-## Grabar el demo de 90 segundos
-
-```bash
-./run_demo.sh --check   # verifica todo (venv, .env, Burp, claude CLI)
-./run_demo.sh           # arranca PromptZero con el banner de upstream
-```
-
-Después seguís el storyboard de `DEMO_SCRIPT.md` (segundo por segundo,
-prompt exacto para pegar en Claude Code, layout de pantalla, alternativas
-de B-roll y comandos de emergencia si algo falla en vivo).
 
 ---
 
