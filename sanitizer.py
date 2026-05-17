@@ -812,16 +812,41 @@ class Sanitizer:
             return {k: self._sanitize_value(v) for k, v in val.items()}
         return val
 
+    # Tags whose content is harness-internal and must NOT be sanitized.
+    # Claude Code (and similar agentic clients) embed their tool docs,
+    # skill descriptions, runtime context blurbs and other boilerplate
+    # inside <system-reminder>…</system-reminder> tags in regular user
+    # messages — running NLP/regex over that text just generates
+    # synthetic placeholders for words like "Skill", "Examples", "Bash".
+    _PASSTHROUGH_TAG_RE = re.compile(
+        r"<system-reminder>.*?</system-reminder>",
+        re.DOTALL | re.IGNORECASE,
+    )
+
+    def _sanitize_text(self, text: str) -> str:
+        """Sanitize a text block but treat the contents of well-known
+        framework-boilerplate tags as pass-through."""
+        if not text or "<system-reminder>" not in text.lower():
+            return self.sanitize(text)
+        out: List[str] = []
+        last = 0
+        for m in self._PASSTHROUGH_TAG_RE.finditer(text):
+            out.append(self.sanitize(text[last:m.start()]))
+            out.append(text[m.start():m.end()])  # framework block, untouched
+            last = m.end()
+        out.append(self.sanitize(text[last:]))
+        return "".join(out)
+
     def _sanitize_content(self, content) -> object:
         if isinstance(content, str):
-            return self.sanitize(content)
+            return self._sanitize_text(content)
         if isinstance(content, list):
             out = []
             for block in content:
                 b = dict(block)
                 t = b.get("type")
                 if t == "text":
-                    b["text"] = self.sanitize(b.get("text", ""))
+                    b["text"] = self._sanitize_text(b.get("text", ""))
                 elif t == "tool_use":
                     # The model's tool call arguments — e.g. a Bash
                     # command — routinely contain the real values it
