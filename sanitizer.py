@@ -482,26 +482,48 @@ class Sanitizer:
     # -----------------------------------------------------------------------
 
     def _make_fake(self, kind: str, real: str) -> str:
-        # hostname / host_port / url share a single counter for stem
-        # selection so the same .localhost stem is never reused across
-        # kinds for different real values. The per-kind counter is still
-        # bumped (used for stats display).
+        # hostname / host_port / url all reduce to a "real host" entity.
+        # Whatever surface form we got (bare host, host:port, full URL),
+        # extract the host, look up (or mint) one fake host for it, and
+        # reuse the same fake host in every other surface form in the
+        # same session. This guarantees coherence: a single real hostname
+        # like nike.com always sees the same fake (e.g. alpha.localhost)
+        # whether it appears as a bare reference, inside a URL, or with a
+        # port — which is what makes desanitize() correctly restore the
+        # LLM's free-form mentions of the host alone.
         if kind in ("hostname", "host_port", "url"):
-            self.table.next_count(kind)
-            host_n = self.table.next_count("_host_pool")
-            stem = _fake_host_stem(host_n)
+            self.table.next_count(kind)  # for stats
             if kind == "hostname":
-                return f"{stem}.localhost"
-            if kind == "host_port":
-                m = re.match(r'^([^:]+):(\d+)$', real)
+                real_host, scheme, rest = real, "", ""
+                port = None
+            elif kind == "host_port":
+                m = re.match(r"^([^:]+):(\d+)$", real)
+                real_host = m.group(1) if m else real
                 port = m.group(2) if m else "0"
-                return f"{stem}.localhost:{port}"
+                scheme, rest = "", ""
+            else:  # url
+                m = re.match(r"(https?://)?([^/?#:]+)(.*)", real, re.IGNORECASE)
+                scheme = (m.group(1) or "") if m else ""
+                real_host = (m.group(2) or real) if m else real
+                rest = (m.group(3) or "") if m else ""
+                port = None
+
+            # Get-or-create the fake hostname for this real host. We
+            # register the bare-host mapping explicitly so desanitize()
+            # works even when the LLM only echoes the host name (no
+            # scheme, no path).
+            fake_host = self.table.get_fake(real_host)
+            if fake_host is None:
+                host_n = self.table.next_count("_host_pool")
+                fake_host = f"{_fake_host_stem(host_n)}.localhost"
+                self.table.register(real_host, fake_host, "hostname")
+
+            if kind == "hostname":
+                return fake_host
+            if kind == "host_port":
+                return f"{fake_host}:{port}"
             # url
-            m = re.match(r'(https?://)([^/?#]+)(.*)', real, re.IGNORECASE)
-            if m:
-                scheme, _host, rest = m.groups()
-                return f"{scheme}{stem}.localhost{rest}"
-            return f"{stem}.localhost"
+            return f"{scheme}{fake_host}{rest}" if scheme else f"{fake_host}{rest}"
 
         n = self.table.next_count(kind)
 
