@@ -285,39 +285,119 @@ async def _stream_desanitized(
     """Forward a streaming response from Claude and desanitize it before
     emitting to the client.
 
-    Why we buffer the whole stream first: Anthropic emits the response one
-    SSE event at a time, and each event carries only a few characters of
-    text in its `text_delta.text` field. A multi-token synthetic value
-    like "Alice Harrington" routinely arrives split across two events
-    ("Alice" in one, " Harrington" in the next). A naive per-event
-    desanitize never matches those splits, and the synthetic values leak
-    through to the client.
+    Anthropic streams the response as a sequence of SSE events. Each
+    event carries only a few characters of payload — either text (in
+    `text_delta.text`) or a fragment of a tool-use JSON input (in
+    `input_json_delta.partial_json`). A multi-token synthetic value
+    routinely arrives split across two events ("Alice" in one,
+    " Harrington" in the next), and a naive substring-replace over the
+    raw SSE buffer can't bridge that split because there's literal SSE
+    framing (`\\n\\nevent: ...\\ndata: {...}`) sitting between the two
+    halves.
+
+    So this generator parses each event semantically:
+      1. Buffer every event off the upstream connection.
+      2. Per content-block index, accumulate the running text (for
+         text_delta) and partial_json (for input_json_delta) across all
+         deltas — those concatenations *do* contain the synthetic
+         values intact.
+      3. Desanitize the accumulated text per block.
+      4. Re-emit the events with the entire desanitized payload placed
+         in the *first* delta of each block and empty payloads in the
+         subsequent deltas, so the wire framing stays valid and the
+         client's JSON / text decoder still ends up with the right
+         result after concatenation.
 
     Trade-off: real-time token-by-token streaming UX is lost — the
-    response appears in one go once the full body has been received and
-    desanitized. We accept this in exchange for correctness; for a
-    privacy tool, "the desanitization is wrong sometimes" is not a
-    survivable failure mode. A future fix can do incremental
-    desanitization with a lookback buffer sized to the longest fake
-    value, but a correct simple implementation lands first.
-
-    The httpx client lives inside this generator so it outlives the
-    route handler (the StreamingResponse iterates after the route
-    returns).
+    client sees the response in one go once the upstream stream
+    completes. For a privacy tool, "desanitization is wrong sometimes"
+    isn't a survivable failure mode; correctness wins.
     """
-    raw = []
+    import json as _json
+
+    raw_chunks: list = []
     status = 200
     async with _httpx_client() as client:
         async with client.stream("POST", url, json=payload, headers=headers) as resp:
             status = resp.status_code
             async for chunk in resp.aiter_text():
-                raw.append(chunk)
-    # SSE events have intact `data: …` lines once the stream finishes,
-    # so a single pass of desanitize() over the joined buffer correctly
-    # replaces every fake value — including ones that were split across
-    # events on the wire.
-    full = "".join(raw)
-    desanitized = sanitizer.desanitize(full)
+                raw_chunks.append(chunk)
+
+    full = "".join(raw_chunks)
+    events = full.split("\n\n")
+
+    # Pass 1 — accumulate text per (block_index, kind) so synthetic
+    # values that span multiple deltas can be desanitized intact.
+    accum: dict = {}
+    for ev in events:
+        for line in ev.split("\n"):
+            if not line.startswith("data: "):
+                continue
+            try:
+                data = _json.loads(line[6:])
+            except _json.JSONDecodeError:
+                continue
+            if data.get("type") != "content_block_delta":
+                continue
+            idx = data.get("index", 0)
+            delta = data.get("delta", {}) or {}
+            dtype = delta.get("type")
+            if dtype == "text_delta":
+                accum.setdefault((idx, "text"), []).append(delta.get("text", ""))
+            elif dtype == "input_json_delta":
+                accum.setdefault((idx, "json"), []).append(delta.get("partial_json", ""))
+
+    desan_accum = {
+        key: sanitizer.desanitize("".join(parts))
+        for key, parts in accum.items()
+    }
+
+    # Pass 2 — re-emit events. For each (block_index, kind), the first
+    # delta carries the entire desanitized payload; later deltas for the
+    # same block become empty placeholders so the event count stays the
+    # same and any client-side state machines don't trip.
+    consumed: set = set()
+    out_events: list = []
+    for ev in events:
+        new_lines: list = []
+        for line in ev.split("\n"):
+            if not line.startswith("data: "):
+                new_lines.append(line)
+                continue
+            try:
+                data = _json.loads(line[6:])
+            except _json.JSONDecodeError:
+                new_lines.append(line)
+                continue
+            if data.get("type") != "content_block_delta":
+                new_lines.append(line)
+                continue
+            idx = data.get("index", 0)
+            delta = data.get("delta", {}) or {}
+            dtype = delta.get("type")
+            if dtype == "text_delta":
+                key = (idx, "text")
+                if key not in consumed:
+                    delta["text"] = desan_accum.get(key, delta.get("text", ""))
+                    consumed.add(key)
+                else:
+                    delta["text"] = ""
+                data["delta"] = delta
+                new_lines.append("data: " + _json.dumps(data, ensure_ascii=False))
+            elif dtype == "input_json_delta":
+                key = (idx, "json")
+                if key not in consumed:
+                    delta["partial_json"] = desan_accum.get(key, delta.get("partial_json", ""))
+                    consumed.add(key)
+                else:
+                    delta["partial_json"] = ""
+                data["delta"] = delta
+                new_lines.append("data: " + _json.dumps(data, ensure_ascii=False))
+            else:
+                new_lines.append(line)
+        out_events.append("\n".join(new_lines))
+
+    desanitized = "\n\n".join(out_events)
 
     if trace_info is not None:
         _log_trace(
