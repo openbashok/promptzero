@@ -386,10 +386,29 @@ _REGEX_PATTERNS: List[Tuple[str, re.Pattern]] = [
     )),
 
     # ------------------------------------------------------------------
-    # Long opaque tokens — API keys, secrets (≥32 chars)
+    # Long opaque tokens — API keys, JWTs, bearer secrets.
+    #
+    # Generic ≥32-char alphanumeric runs were too greedy: they ate
+    # filesystem paths like
+    #   /Users/me/.claude/projects/-Volumes-External-...-test_docker
+    # mapping them to FAKE_TOKEN_0001 and confusing the model when it
+    # reads back its own memory files. Real secrets are high-entropy:
+    # require at least one uppercase AND at least one digit in the run.
+    # Path components are usually all-lowercase kebab-case or hex
+    # hashes — neither has uppercase letters and digits both.
+    #
+    # Common forms still matched:
+    #   • Anthropic   sk-ant-api03-XYZ...123...
+    #   • OpenAI      sk-XYZ...123...
+    #   • AWS access  AKIAIOSFODNN7EXAMPLE
+    #   • GitHub      ghp_XYZ123...
+    #   • JWTs        eyJhbG... (always has mix)
     # ------------------------------------------------------------------
 
-    ("token", re.compile(r'\b[A-Za-z0-9_\-]{32,}\b')),
+    ("token", re.compile(
+        r"\b(?=[A-Za-z0-9_\-]{32,}\b)(?=[A-Za-z0-9_\-]*[A-Z])"
+        r"(?=[A-Za-z0-9_\-]*\d)[A-Za-z0-9_\-]+\b"
+    )),
 ]
 
 # ---------------------------------------------------------------------------
