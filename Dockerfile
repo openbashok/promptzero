@@ -3,17 +3,17 @@
 # =====================================================================
 # PromptZero — Dockerfile
 # ---------------------------------------------------------------------
-# Multi-stage build: a fat builder with all the toolchain we need to
-# install Presidio / spaCy and download the NLP models, and a slim
-# runtime that only carries the Python packages, the models, and the
-# proxy source.
+# Multi-stage build. The builder installs every Python dependency and
+# downloads the spaCy NLP models into a self-contained virtualenv at
+# /opt/venv. The runtime stage just copies that venv plus the proxy
+# source, drops privileges to a non-root user and starts uvicorn.
 #
-#   docker build -t promptzero .
-#   docker run -p 8000:8000 -e ANTHROPIC_API_KEY=sk-ant-... promptzero
+#   docker run -p 8000:8000 -e ANTHROPIC_API_KEY=sk-ant-... \
+#     ghcr.io/openbashok/promptzero
 #
 # Override the spaCy model size with --build-arg SPACY_SIZE=md|sm to
-# produce a lighter image (the default 'lg' is best accuracy but the
-# image lands around 1.5 GB; 'sm' lands around 300 MB).
+# produce a lighter image (default 'lg' is best accuracy ~1.5 GB; 'sm'
+# lands around 300 MB).
 # =====================================================================
 
 
@@ -35,13 +35,20 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends build-essential \
  && rm -rf /var/lib/apt/lists/*
 
+# Use a self-contained virtualenv so the runtime stage can copy a
+# single directory and have everything (deps + spaCy models) in place.
+# This avoids the `pip install --user` foot-gun where `spacy download`
+# installs models to global site-packages instead of /root/.local.
+ENV VIRTUAL_ENV=/opt/venv
+RUN python -m venv "$VIRTUAL_ENV"
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+
 WORKDIR /build
-
 COPY requirements.txt .
-RUN pip install --user --no-warn-script-location -r requirements.txt
+RUN pip install -r requirements.txt
 
-# Download both spaCy NLP models — bundled in the final image so the
-# first request doesn't pay the model download cost.
+# Download both spaCy NLP models — bundled inside the venv so the
+# first request doesn't pay the model download cost at runtime.
 RUN python -m spacy download "en_core_web_${SPACY_SIZE}" \
  && python -m spacy download "es_core_news_${SPACY_SIZE}"
 
@@ -53,7 +60,9 @@ FROM python:3.12-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PATH=/home/promptzero/.local/bin:$PATH
+    VIRTUAL_ENV=/opt/venv \
+    PATH=/opt/venv/bin:$PATH \
+    RELOAD=false
 
 # curl is used by the HEALTHCHECK below.
 RUN apt-get update \
@@ -62,11 +71,12 @@ RUN apt-get update \
 
 # Non-root user — the proxy doesn't need elevated privileges.
 RUN useradd --create-home --shell /bin/bash promptzero
+
+# Bring the virtualenv (deps + spaCy models) from the builder.
+COPY --from=builder --chown=promptzero:promptzero /opt/venv /opt/venv
+
 USER promptzero
 WORKDIR /home/promptzero
-
-# Bring over the Python packages and spaCy models from the builder.
-COPY --from=builder --chown=promptzero:promptzero /root/.local /home/promptzero/.local
 
 # Proxy source.
 COPY --chown=promptzero:promptzero main.py sanitizer.py ./

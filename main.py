@@ -593,4 +593,9 @@ async def passthrough(request: Request, path: str):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=PORT, reload=True)
+    # Hot reload is convenient for local hacking on the proxy but wastes
+    # resources in a container (where the files never change). Default
+    # on for native runs, off when RELOAD=false is set (which the
+    # Dockerfile does).
+    reload = os.getenv("RELOAD", "true").lower() in ("1", "true", "yes", "on")
+    uvicorn.run("main:app", host="0.0.0.0", port=PORT, reload=reload)
