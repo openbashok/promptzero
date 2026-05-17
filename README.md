@@ -12,7 +12,7 @@
 **Zero Trust architecture for LLM prompts.**
 *Zero trace. Full answer.*
 
-[![Version](https://img.shields.io/badge/version-2.2.0-blue.svg)](https://github.com/openbash/promptzero)
+[![Version](https://img.shields.io/badge/version-2.2.0-blue.svg)](https://github.com/openbashok/promptzero)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![OpenBash](https://img.shields.io/badge/by-OpenBash.com-red.svg)](https://openbash.com)
@@ -163,7 +163,7 @@ Text input
     │     CREDIT_CARD, IBAN, SSN, PASSPORT,
     │     NATIONAL_ID (ES_NIF, NRP), URL, IP_ADDRESS
     │
-    ├─▶ [ Regex Layer — country-specific PII ]
+    ├─▶ [ Regex Layer — country-specific national IDs ]
     │     AR: DNI, CUIT/CUIL          CL: RUT
     │     ES: DNI/NIE                 UY: CI
     │     CO: Cédula (CC)             MX: CURP, RFC
@@ -203,7 +203,7 @@ admin@acme.com      ←──────▶  user001@fakecorp.local
 
 ```bash
 # Clone
-git clone https://github.com/openbash/promptzero
+git clone https://github.com/openbashok/promptzero
 cd promptzero
 
 # Setup (installs deps + downloads spaCy NLP models en + es)
@@ -278,7 +278,7 @@ curl http://localhost:8000/v1/messages \
 # Health check
 GET  /health
 
-# Cumulative counters since startup (requests, bytes, PII spans by kind)
+# Cumulative counters since startup (requests, bytes, sensitive spans by kind)
 GET  /stats
 
 # Inspect what PromptZero mapped in a session (debug)
@@ -290,7 +290,7 @@ DELETE /sessions/{session_id}
 
 The proxy terminal prints **one colored trace line per request**, showing
 exactly what got sanitized — useful when running Claude Code (or any
-client) alongside it so you can verify in real time which PII was masked
+client) alongside it so you can verify in real time which sensitive data was masked
 on each turn:
 
 ```
@@ -440,7 +440,7 @@ python demo_local.py
 python demo_local.py data/01_personal_records.json
 
 # Visual HTML report — side-by-side original vs sanitized with each
-# PII span colour-coded, hover-to-link mappings, summary table.
+# sensitive span colour-coded, hover-to-link mappings, summary table.
 python demo_html.py --open
 python demo_html.py --with-claude --task triage \
     --dataset data/04_incident_response.json --out ir.html --open
@@ -490,27 +490,6 @@ python report.py findings.json --protect "P@ssw0rd1" "Summer2023!"
 
 See [`examples/pentest_report/sample_findings.json`](examples/pentest_report/sample_findings.json)
 for a complete example with 6 realistic findings (critical → low).
-
----
-
-## Why PromptZero?
-
-```
-                    SaaS Vendors          PromptZero
-                    (Private AI,          (this project)
-                     Protecto, etc.)
-                   ─────────────────      ──────────────────
-Data leaves env?    YES — goes to them    NO — stays local
-Cost                Per-volume billing   Free / open source
-Works offline       No                   Yes
-Pentesting-aware    No                   Yes (127.0.0.x)
-Customizable        Limited              Full source access
-Auditable           No                   Yes
-Paradox-free        No*                  Yes
-
-* Sending private data to a third party so they can "protect" it
-  before sending it to another third party is not privacy.
-```
 
 ---
 
@@ -569,7 +548,7 @@ proxy local y transparente que detecta y reemplaza datos sensibles — identidad
 infraestructura, secretos, material de cliente — en tus prompts **antes** de que
 crucen el perímetro de tu entorno, y restaura los valores reales en la respuesta.
 
-**Slogan:** *Zero trace. Full answer.*
+*Zero trace. Full answer.*
 
 ---
 
@@ -675,7 +654,7 @@ Texto de entrada
     │     CREDIT_CARD, IBAN, SSN, PASSPORT,
     │     NATIONAL_ID (ES_NIF, NRP), URL, IP_ADDRESS
     │
-    ├─▶ [ Capa Regex — PII por país ]
+    ├─▶ [ Capa Regex — IDs nacionales por país ]
     │     AR: DNI, CUIT/CUIL          CL: RUT
     │     ES: DNI/NIE                 UY: CI
     │     CO: Cédula (CC)             MX: CURP, RFC
@@ -774,7 +753,7 @@ curl -X POST http://localhost:8000/v1/messages \
   -d '{
     "model": "claude-opus-4-6",
     "max_tokens": 1024,
-    "messages": [{"role":"user","content":"…tu prompt con PII…"}]
+    "messages": [{"role":"user","content":"…tu prompt con datos sensibles…"}]
   }'
 ```
 
@@ -810,7 +789,7 @@ Te tira algo así, actualizándose cada segundo:
 
 Además la terminal del proxy imprime **una línea coloreada por request**
 mostrando exactamente lo que se sanitizó, útil para verificar en tiempo
-real qué PII se enmascaró en cada turno cuando corrés Claude Code (o
+real qué datos sensibles se enmascararon en cada turno cuando corrés Claude Code (o
 cualquier cliente) al lado:
 
 ```
@@ -897,7 +876,7 @@ cd examples/poc
 python demo_local.py
 python demo_local.py data/01_personal_records.json
 
-# Reporte HTML visual — ideal para video. Paneles side-by-side coloreados.
+# Reporte HTML visual — paneles side-by-side coloreados, hover-to-link mappings.
 python demo_html.py --open
 python demo_html.py --with-claude --task triage \
     --dataset data/04_incident_response.json --out ir.html --open
