@@ -715,6 +715,19 @@ class Sanitizer:
     # Claude API-aware helpers
     # -----------------------------------------------------------------------
 
+    def _sanitize_value(self, val):
+        """Recursively sanitize every string inside a JSON-shaped value.
+        Used to walk tool_use `input` objects (the model's tool call
+        arguments) and any other nested structure where sensitive
+        strings might land."""
+        if isinstance(val, str):
+            return self.sanitize(val)
+        if isinstance(val, list):
+            return [self._sanitize_value(v) for v in val]
+        if isinstance(val, dict):
+            return {k: self._sanitize_value(v) for k, v in val.items()}
+        return val
+
     def _sanitize_content(self, content) -> object:
         if isinstance(content, str):
             return self.sanitize(content)
@@ -722,8 +735,24 @@ class Sanitizer:
             out = []
             for block in content:
                 b = dict(block)
-                if b.get("type") == "text":
+                t = b.get("type")
+                if t == "text":
                     b["text"] = self.sanitize(b.get("text", ""))
+                elif t == "tool_use":
+                    # The model's tool call arguments — e.g. a Bash
+                    # command — routinely contain the real values it
+                    # received from a previous desanitized turn. They
+                    # have to be re-sanitized here so the conversation
+                    # history doesn't leak them back to Anthropic.
+                    b["input"] = self._sanitize_value(b.get("input"))
+                elif t == "tool_result":
+                    # tool_result.content is either a string with the
+                    # tool's stdout/stderr or a list of content blocks.
+                    # In both cases it can carry IPs, hostnames, file
+                    # paths, command output — all of which need the
+                    # same sanitization the rest of the request gets.
+                    b["content"] = self._sanitize_content(b.get("content", ""))
+                # `thinking`, `image`, etc. — pass through untouched.
                 out.append(b)
             return out
         return content
