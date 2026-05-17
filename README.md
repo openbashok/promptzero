@@ -201,27 +201,59 @@ admin@acme.com      ←──────▶  user001@fakecorp.local
 
 ## Quick Start
 
+Two ways to run the proxy. Same behaviour either way — pick whichever
+fits your environment.
+
+### Option A — Docker (recommended)
+
+No Python, no virtualenv, no model download dance. Models are baked
+into the published image (linux/amd64 + linux/arm64). Pull and run:
+
 ```bash
-# Clone
-git clone https://github.com/openbashok/promptzero
-cd promptzero
-
-# Setup (installs deps + downloads spaCy NLP models en + es)
-./setup.sh
-
-# Configure
-cp .env.example .env
-# → edit .env and add your ANTHROPIC_API_KEY
-
-# Run
-python main.py
+docker run -p 8000:8000 \
+    -e ANTHROPIC_API_KEY=sk-ant-... \
+    ghcr.io/openbashok/promptzero:latest
 # Listening on http://localhost:8000
 ```
 
-> Setup downloads spaCy models for **English + Spanish** by default
-> (≈560 MB each — covers AR, CL, CO, ES, MX, PE, UY and English text).
-> Use `./setup.sh medium` (~40 MB) or `./setup.sh small` (~12 MB) for
-> lighter installs, or `./setup.sh en-only` if you only process English.
+Common variants:
+
+```bash
+# Pass a full .env file (ANTHROPIC_API_KEY + UPSTREAM_PROXY + …)
+docker run -p 8000:8000 --env-file .env ghcr.io/openbashok/promptzero
+
+# Route the upstream hop through Burp running on the host (macOS / Windows)
+docker run -p 8000:8000 --env-file .env \
+    -e UPSTREAM_PROXY=http://host.docker.internal:8080 \
+    -e UPSTREAM_VERIFY=false \
+    ghcr.io/openbashok/promptzero
+```
+
+Build it yourself if you prefer:
+
+```bash
+git clone https://github.com/openbashok/promptzero && cd promptzero
+docker build -t promptzero .                       # 'lg' models, ~1.5 GB
+docker build --build-arg SPACY_SIZE=sm -t promptzero:slim .   # ~300 MB
+```
+
+### Option B — Native install
+
+Useful if you want to hack on the proxy itself or you prefer to keep
+the venv on your host.
+
+```bash
+git clone https://github.com/openbashok/promptzero
+cd promptzero
+
+./setup.sh                 # venv + deps + spaCy models en + es (~1 GB)
+cp .env.example .env       # add your ANTHROPIC_API_KEY
+python main.py             # listening on http://localhost:8000
+```
+
+`./setup.sh` downloads the `lg` spaCy models by default. Use
+`./setup.sh medium` (~40 MB) or `./setup.sh small` (~12 MB) for a
+lighter install, or `./setup.sh en-only` if you only process English.
 
 ---
 
@@ -692,23 +724,58 @@ admin@acme.com      ←──────▶  user001@fakecorp.local
 
 ## Inicio rápido
 
+Hay dos formas de correr el proxy. El comportamiento es idéntico — usás
+la que mejor te encaje.
+
+### Opción A — Docker (recomendado)
+
+Sin Python, sin virtualenv, sin descarga de modelos. La imagen publicada
+ya trae los modelos adentro (linux/amd64 + linux/arm64). Pull y run:
+
+```bash
+docker run -p 8000:8000 \
+    -e ANTHROPIC_API_KEY=sk-ant-... \
+    ghcr.io/openbashok/promptzero:latest
+# Escuchando en http://localhost:8000
+```
+
+Variantes comunes:
+
+```bash
+# Pasar un .env entero (ANTHROPIC_API_KEY + UPSTREAM_PROXY + …)
+docker run -p 8000:8000 --env-file .env ghcr.io/openbashok/promptzero
+
+# Rutear el hop upstream por Burp corriendo en el host (macOS / Windows)
+docker run -p 8000:8000 --env-file .env \
+    -e UPSTREAM_PROXY=http://host.docker.internal:8080 \
+    -e UPSTREAM_VERIFY=false \
+    ghcr.io/openbashok/promptzero
+```
+
+O buildea local si preferís:
+
+```bash
+git clone https://github.com/openbashok/promptzero && cd promptzero
+docker build -t promptzero .                       # modelos 'lg', ~1.5 GB
+docker build --build-arg SPACY_SIZE=sm -t promptzero:slim .   # ~300 MB
+```
+
+### Opción B — Instalación nativa
+
+Útil si querés hackear el proxy o preferís dejar el venv en tu host.
+
 ```bash
 git clone https://github.com/openbashok/promptzero
 cd promptzero
 
-# Setup completo (venv + deps + modelos spaCy en+es, ~560 MB c/u)
-./setup.sh
-# Variantes: ./setup.sh medium (~40 MB)  /  ./setup.sh small (~12 MB)
-#            ./setup.sh en-only         (solo inglés)
-
-# Configurar
-cp .env.example .env
-# → editar .env y poner ANTHROPIC_API_KEY=sk-ant-...
-
-# Levantar el proxy
-python main.py
-# Escuchando en http://localhost:8000
+./setup.sh                 # venv + deps + modelos spaCy en+es (~1 GB)
+cp .env.example .env       # poner ANTHROPIC_API_KEY=sk-ant-...
+python main.py             # escuchando en http://localhost:8000
 ```
+
+`./setup.sh` baja los modelos `lg` por default. Variantes: `./setup.sh
+medium` (~40 MB), `./setup.sh small` (~12 MB), o `./setup.sh en-only`
+si solo procesás inglés.
 
 Después, en tu app:
 

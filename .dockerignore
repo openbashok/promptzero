@@ -1,0 +1,35 @@
+# Local dev environment — not needed inside the image
+.git
+.gitignore
+.venv
+venv
+env
+.env
+.env.local
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+.DS_Store
+*.log
+dist
+build
+.claude
+.idea
+.vscode
+
+# Internal helpers / docs that don't belong in the runtime image
+run_demo.sh
+DEMO_SCRIPT.md
+agents
+
+# Example clients — installable separately by users who want them
+examples/document_summary
+examples/pentest_report
+examples/poc
+
+# Generated artifacts
+*.html
+*.png
+report.html
+demo-video.html
