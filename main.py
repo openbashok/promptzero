@@ -280,29 +280,58 @@ async def _stream_desanitized(
     payload: dict,
     headers: dict,
     sanitizer: Sanitizer,
+    trace_info: Optional[dict] = None,
 ) -> AsyncIterator[str]:
-    """
-    Forward a streaming response from Claude and desanitize each SSE event.
-    SSE events are delimited by double-newlines, so we buffer until we have
-    a complete event before running desanitization — this avoids the risk of
-    a fake value being split across two chunks.
+    """Forward a streaming response from Claude and desanitize it before
+    emitting to the client.
 
-    Owns its own httpx client so the lifecycle matches the stream consumer
-    (the StreamingResponse iterates after the route handler returns, so the
-    client must outlive the route function).
+    Why we buffer the whole stream first: Anthropic emits the response one
+    SSE event at a time, and each event carries only a few characters of
+    text in its `text_delta.text` field. A multi-token synthetic value
+    like "Alice Harrington" routinely arrives split across two events
+    ("Alice" in one, " Harrington" in the next). A naive per-event
+    desanitize never matches those splits, and the synthetic values leak
+    through to the client.
+
+    Trade-off: real-time token-by-token streaming UX is lost — the
+    response appears in one go once the full body has been received and
+    desanitized. We accept this in exchange for correctness; for a
+    privacy tool, "the desanitization is wrong sometimes" is not a
+    survivable failure mode. A future fix can do incremental
+    desanitization with a lookback buffer sized to the longest fake
+    value, but a correct simple implementation lands first.
+
+    The httpx client lives inside this generator so it outlives the
+    route handler (the StreamingResponse iterates after the route
+    returns).
     """
-    buffer = ""
+    raw = []
+    status = 200
     async with _httpx_client() as client:
         async with client.stream("POST", url, json=payload, headers=headers) as resp:
+            status = resp.status_code
             async for chunk in resp.aiter_text():
-                buffer += chunk
-                # SSE events end with \n\n
-                while "\n\n" in buffer:
-                    event, buffer = buffer.split("\n\n", 1)
-                    yield sanitizer.desanitize(event) + "\n\n"
-        # Flush any remaining data
-        if buffer:
-            yield sanitizer.desanitize(buffer)
+                raw.append(chunk)
+    # SSE events have intact `data: …` lines once the stream finishes,
+    # so a single pass of desanitize() over the joined buffer correctly
+    # replaces every fake value — including ones that were split across
+    # events on the wire.
+    full = "".join(raw)
+    desanitized = sanitizer.desanitize(full)
+
+    if trace_info is not None:
+        _log_trace(
+            route="POST /v1/messages (stream)",
+            session_id=trace_info["session_id"],
+            sanitizer=sanitizer,
+            bytes_in=trace_info["bytes_in"],
+            bytes_out=len(desanitized.encode("utf-8")),
+            status=status,
+            elapsed_ms=int((time.time() - trace_info["t0"]) * 1000),
+            spans_before=trace_info["spans_before"],
+        )
+
+    yield desanitized
 
 
 # ---------------------------------------------------------------------------
@@ -360,9 +389,18 @@ async def proxy_messages(
     streaming = body.get("stream", False)
 
     if streaming:
-        # The streaming generator owns its own httpx client.
+        # The streaming generator owns its own httpx client and emits its
+        # own [trace] line once the full body has been desanitized.
         return StreamingResponse(
-            _stream_desanitized(target_url, clean_body, upstream_headers, sanitizer),
+            _stream_desanitized(
+                target_url, clean_body, upstream_headers, sanitizer,
+                trace_info={
+                    "session_id": session_id,
+                    "bytes_in": _bytes_in,
+                    "spans_before": _spans_before,
+                    "t0": _t0,
+                },
+            ),
             media_type="text/event-stream",
             headers={"x-session-id": session_id},
         )
