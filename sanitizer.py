@@ -391,6 +391,18 @@ _CC_4x4_RE = re.compile(r"\d{4}[\s\-]?\d{4}[\s\-]?\d{4}[\s\-]?\d{4}")
 _NAME_FORBIDDEN_CHARS = set("0123456789/:<>[]{}()*=+\\|`~^_;\"")
 
 
+_VALID_HOST_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9\-]*(?:\.[A-Za-z0-9][A-Za-z0-9\-]*)+$")
+
+
+def _is_valid_host(value: str) -> bool:
+    """Return True if `value` looks like a real hostname (alphanumeric +
+    dots + hyphens, at least one dot, no garbage). Presidio's URL
+    recognizer occasionally matches pathological input like a literal
+    comma or punctuation — accepting that as a host would pollute the
+    mapping table and reverse-replace legitimate fakes in the response."""
+    return bool(_VALID_HOST_RE.match(value.strip()))
+
+
 def _looks_like_real_name_or_org(value: str) -> bool:
     """Return False for strings that look like technical noise rather than
     a person's name or an organization. The aim is to keep recall on
@@ -507,6 +519,14 @@ class Sanitizer:
                 real_host = (m.group(2) or real) if m else real
                 rest = (m.group(3) or "") if m else ""
                 port = None
+
+            # Reject pathological host extractions. Presidio's URL
+            # recognizer sometimes flags non-host punctuation, and
+            # accepting them would (a) burn a hostname pool slot on
+            # garbage and (b) make desanitize() reverse-replace
+            # legitimate fakes in the response with the punctuation.
+            if not _is_valid_host(real_host):
+                return real
 
             # Get-or-create the fake hostname for this real host. We
             # register the bare-host mapping explicitly so desanitize()
