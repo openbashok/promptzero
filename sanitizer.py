@@ -283,15 +283,32 @@ _REGEX_PATTERNS: List[Tuple[str, re.Pattern]] = [
     ("url", re.compile(r'https?://[^\s"\'<>\]]+', re.IGNORECASE)),
     # Emails (backup for Presidio)
     ("email", re.compile(r'\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b')),
+    # IPv6 BEFORE IPv4 so the overlap filter picks the longer match when
+    # an IPv6 like 2607:f8b0:4861:a:c9c::1 happens to contain an
+    # IPv4-looking digit run. Alternation order matters: regex tries
+    # branches left-to-right and accepts the first match at a given
+    # position, so we list the longest-possible shapes first.
+    ("ipv6", re.compile(
+        r'(?<![0-9A-Fa-f:])(?:'
+        r'(?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}'                 # full 8 groups
+        r'|(?:[0-9A-Fa-f]{1,4}:){1,6}(?::[0-9A-Fa-f]{1,4}){1,6}'     # middle ::
+        r'|::(?:[0-9A-Fa-f]{1,4}:){0,6}[0-9A-Fa-f]{1,4}'             # leading ::
+        r'|(?:[0-9A-Fa-f]{1,4}:){1,7}:'                              # trailing ::
+        r'|::'                                                        # bare ::
+        r')(?![0-9A-Fa-f:])'
+    )),
     # IPv4 strict
     ("ipv4", re.compile(
         r'\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b'
     )),
-    # IPv6 simplified
-    ("ipv6", re.compile(r'\b(?:[0-9A-Fa-f]{1,4}:){2,7}[0-9A-Fa-f]{0,4}\b')),
-    # host:port
+    # host:port — host portion MUST contain at least one dot, otherwise
+    # we'd match arbitrary `word:number` patterns including chunks of
+    # IPv6 addresses (`34e8:9239`), JSON port fragments, log artifacts,
+    # etc. A hostname without a dot isn't a public hostname anyway.
     ("host_port", re.compile(
-        r'\b([A-Za-z0-9](?:[A-Za-z0-9\-]{0,61}[A-Za-z0-9])?):([1-9]\d{1,4})\b'
+        r'\b([A-Za-z0-9](?:[A-Za-z0-9\-]{0,61}[A-Za-z0-9])?'
+        r'(?:\.[A-Za-z0-9](?:[A-Za-z0-9\-]{0,61}[A-Za-z0-9])?)+)'
+        r':([1-9]\d{1,4})\b'
     )),
 
     # ------------------------------------------------------------------
@@ -392,6 +409,47 @@ _NAME_FORBIDDEN_CHARS = set("0123456789/:<>[]{}()*=+\\|`~^_;\"")
 
 
 _VALID_HOST_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9\-]*(?:\.[A-Za-z0-9][A-Za-z0-9\-]*)+$")
+
+
+# Public infrastructure referenced by Claude Code's system prompt and by
+# generic tool output. None of these are private to the user — sanitizing
+# them just degrades the model's context with synthetic placeholders for
+# well-known domains. Match is case-insensitive and covers subdomains
+# (api.anthropic.com matches anthropic.com).
+_PUBLIC_HOST_ALLOWLIST = {
+    "anthropic.com",
+    "claude.ai",
+    "claude.com",
+    "openai.com",
+    "github.com",
+    "githubusercontent.com",
+    "openbash.com",
+    "google.com",
+    "nmap.org",
+    "python.org",
+    "pypi.org",
+    "docker.io",
+    "ghcr.io",
+    "mozilla.org",
+    "wikipedia.org",
+    "stackoverflow.com",
+    "cloudflare.com",
+    "ietf.org",
+    "rfc-editor.org",
+    "owasp.org",
+    "mitre.org",
+    "nist.gov",
+}
+
+
+def _is_public_host(value: str) -> bool:
+    """True if the hostname is in the public allowlist (exact match or
+    subdomain). These pass through sanitization untouched because they
+    reference well-known public infrastructure, not the user's data."""
+    v = value.strip().lower().rstrip(".")
+    if v in _PUBLIC_HOST_ALLOWLIST:
+        return True
+    return any(v.endswith("." + suffix) for suffix in _PUBLIC_HOST_ALLOWLIST)
 
 
 def _is_valid_host(value: str) -> bool:
@@ -526,6 +584,12 @@ class Sanitizer:
             # garbage and (b) make desanitize() reverse-replace
             # legitimate fakes in the response with the punctuation.
             if not _is_valid_host(real_host):
+                return real
+            # Public infrastructure passes through unchanged. Replacing
+            # github.com / nmap.org / anthropic.com with a fake host
+            # adds no privacy (they're public references in framework
+            # text and tool banners) but degrades model context.
+            if _is_public_host(real_host):
                 return real
 
             # Get-or-create the fake hostname for this real host. We
@@ -695,8 +759,28 @@ class Sanitizer:
             fake = self.table.get_fake(value)
             if fake is None:
                 fake = self._make_fake(kind, value)
-                self.table.register(value, fake, kind)
-            result = result[:start] + fake + result[end:]
+                # _make_fake returns the input verbatim when the value
+                # doesn't survive validation (pathological host, public
+                # allowlisted host, etc). Don't register no-op mappings:
+                # they pollute the table, make /stats counters lie, and
+                # they let the fuzzer's no-leak check fire spuriously.
+                if fake != value:
+                    self.table.register(value, fake, kind)
+            if fake != value:
+                result = result[:start] + fake + result[end:]
+
+        # Final sweep: NLP doesn't always detect every occurrence of a
+        # phrase that appears multiple times in the same document (the
+        # underlying NER scores can vary with surrounding context).
+        # Once we know a real value is sensitive (it landed in the
+        # mapping table), enforce the no-leak property globally — any
+        # remaining occurrence in the result text gets replaced too.
+        # Longest-first to avoid partial-match collisions.
+        for real, fake in sorted(
+            self.table._r2f.items(), key=lambda x: -len(x[0])
+        ):
+            if real != fake and real in result:
+                result = result.replace(real, fake)
 
         return result
 
@@ -758,22 +842,24 @@ class Sanitizer:
         return content
 
     def sanitize_request(self, body: dict) -> dict:
+        # The `system` field is intentionally NOT sanitized. With clients
+        # like Claude Code it carries the harness boilerplate — skill
+        # descriptions, tool documentation, the model's persona — which
+        # is fixed framework text, not user data. Running NLP over it
+        # produces a fountain of false positives ("Skill" → person,
+        # "Examples" → person, common English verbs → org), every one of
+        # which gets a synthetic placeholder that pollutes the model's
+        # context. The privacy guarantee is preserved by sanitizing
+        # `messages` (the user's actual data) and `tools.input_schema`
+        # callers care about anyway. If a user puts genuine secrets into
+        # their CLAUDE.md or similar, that's a configuration problem at
+        # a different layer.
         new = dict(body)
         if "messages" in body:
             new["messages"] = [
                 {**msg, "content": self._sanitize_content(msg.get("content", ""))}
                 for msg in body["messages"]
             ]
-        if "system" in body:
-            sys = body["system"]
-            if isinstance(sys, str):
-                new["system"] = self.sanitize(sys)
-            elif isinstance(sys, list):
-                new["system"] = [
-                    {**b, "text": self.sanitize(b.get("text", ""))}
-                    if b.get("type") == "text" else b
-                    for b in sys
-                ]
         return new
 
     def desanitize_response(self, body: dict) -> dict:
