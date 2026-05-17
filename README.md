@@ -33,8 +33,8 @@
 ## The Problem
 
 You use AI to analyze logs, write pentest reports, review code, summarize contracts.
-But every prompt you send contains real IPs, hostnames, names, credentials, client
-identifiers, payloads. All of that crosses a trust boundary you do not control:
+Every prompt you send contains real IPs, hostnames, names, credentials, client
+identifiers, payloads — and every byte of that crosses a boundary you do not control:
 
 ```
 You type:                          Claude receives:
@@ -45,13 +45,9 @@ You type:                          Claude receives:
  Credentials: admin:P@ss1"          Credentials: admin:P@ss1"  ← your real creds
 ```
 
-**Zero Trust says: never trust a boundary you cannot verify.** Don't trust the
-API not to log it. Don't trust a SaaS that asks you to ship your data to *them*
-so they can "protect" you from a third party. Don't trust your own employees to
-remember which strings are sensitive on every prompt.
-
-PromptZero handles that boundary locally — and lets you verify it end-to-end
-with the same tooling you already use to audit any other API (Burp, mitmproxy).
+Vendor contracts and Private-AI SaaS don't fix this — they just shift trust to
+a different third party. PromptZero handles the boundary locally and lets you
+verify it end-to-end with the tools you already use (Burp, mitmproxy).
 
 ---
 
@@ -373,8 +369,7 @@ curl -s http://localhost:8000/sessions/<id>/mappings | jq
 
 ### Inspecting upstream traffic with Burp Suite (or mitmproxy)
 
-Zero Trust requires verification, not assertion. This is the second half of
-that principle: route PromptZero's upstream connection
+Don't take our word for it — route PromptZero's upstream connection
 (PromptZero → `api.anthropic.com`) through Burp and inspect every byte
 yourself. Two env vars in `.env`:
 
@@ -569,30 +564,25 @@ Attribution appreciated but not required.
 
 ## ¿Qué es PromptZero?
 
-**PromptZero aplica los principios de Zero Trust a la interacción con LLMs.** Es un proxy
-local y transparente que detecta y reemplaza datos sensibles — identidades, infraestructura,
-secretos, material de cliente — en tus prompts **antes** de que crucen el perímetro de tu
-entorno, y restaura los valores reales en la respuesta. Nunca confíes en la API. Siempre
-verificá lo que cruza el borde. Tus datos se quedan en casa.
+**PromptZero aplica los principios de Zero Trust a la interacción con LLMs.** Es un
+proxy local y transparente que detecta y reemplaza datos sensibles — identidades,
+infraestructura, secretos, material de cliente — en tus prompts **antes** de que
+crucen el perímetro de tu entorno, y restaura los valores reales en la respuesta.
 
-**Slogan:** *Zero Trust architecture for LLM prompts. Zero trace. Full answer.*
+**Slogan:** *Zero trace. Full answer.*
 
 ---
 
 ## El Problema
 
 Usás IA para analizar logs, escribir reportes de pentesting, revisar código, resumir
-contratos. Pero cada prompt que enviás contiene IPs reales, hostnames, nombres,
-credenciales, identificadores de cliente, payloads. Todo eso cruza un límite de
-confianza (*trust boundary*) que vos no controlás.
+contratos. Cada prompt que enviás contiene IPs reales, hostnames, nombres, credenciales,
+identificadores de cliente, payloads — y cada byte cruza un borde que vos no controlás.
 
-**Zero Trust dice: nunca confíes en un perímetro que no podés verificar.** No confíes
-en que la API no lo va a loguear. No confíes en un SaaS que te pide mandar tus datos
-a *ellos* para "protegerte" de un tercero. No confíes en que tus empleados van a
-acordarse de qué strings son sensibles en cada prompt.
-
-PromptZero maneja ese borde localmente — y te deja verificarlo end-to-end con las
-mismas herramientas que ya usás para auditar cualquier otra API (Burp, mitmproxy).
+Los contratos del vendor y los SaaS de "Private AI" no resuelven esto — solo desplazan
+la confianza hacia otro tercero. PromptZero maneja el borde localmente y te deja
+verificarlo end-to-end con las mismas herramientas que ya usás para auditar
+cualquier otra API (Burp, mitmproxy).
 
 ---
 
@@ -858,9 +848,9 @@ El proxy maneja toda la superficie de la API:
 
 ## Inspeccionar el tráfico upstream con Burp Suite
 
-Zero Trust requiere verificación, no afirmación. Esta es la segunda mitad
-de ese principio: ruteá la conexión upstream (PromptZero → `api.anthropic.com`)
-a través de Burp y auditá cada byte vos mismo.
+No te quedes con nuestra palabra — ruteá la conexión upstream
+(PromptZero → `api.anthropic.com`) a través de Burp y auditá cada byte
+vos mismo.
 
 ```bash
 # En .env:
