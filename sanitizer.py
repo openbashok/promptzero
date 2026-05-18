@@ -97,6 +97,26 @@ def _fake_host_stem(n: int) -> str:
     base = _FAKE_HOST_STEMS[idx]
     return base if cycle == 0 else f"{base}{cycle + 1}"
 
+
+# IANA-reserved documentation ranges. We mint synthetic IPs inside
+# these — RFC 5737 (`198.51.100.0/24`, `203.0.113.0/24`) for IPv4 and
+# RFC 3849 (`2001:db8::/32`) for IPv6 — so the model treats them as
+# opaque non-existent targets. The same constants are referenced when
+# DETECTING IPs to decide whether the value is already a synthetic and
+# should pass through, instead of re-sanitizing our own fake range
+# into a fresh fake (the model echoes the range back when discussing
+# the redaction convention).
+_FAKE_IPV4_PREFIXES = ("198.51.100.", "203.0.113.")
+_FAKE_IPV6_PREFIX = "2001:db8:"
+
+
+def _is_synthetic_ip(value: str, kind: str) -> bool:
+    if kind == "ipv4":
+        return any(value.startswith(p) for p in _FAKE_IPV4_PREFIXES)
+    if kind == "ipv6":
+        return value.lower().startswith(_FAKE_IPV6_PREFIX)
+    return False
+
 # ---------------------------------------------------------------------------
 # Presidio — lazy global analyzer
 # ---------------------------------------------------------------------------
@@ -114,7 +134,11 @@ _NLP_ENTITIES = [
     "US_PASSPORT",
     "US_DRIVER_LICENSE",
     "ES_NIF",       # Spanish DNI / NIF
-    "NRP",          # Generic National Registration / ID number
+    # NRP (Nationality / Religious / Political) was here but Presidio's
+    # default recogniser fires on technical text like "tcp" / "udp" /
+    # "rdp" and assigns score 0.85, way above any threshold. The
+    # detection quality is too low for our use case, and the entity
+    # itself is rarely the PII people are trying to redact — drop it.
     "URL",
 ]
 
@@ -217,6 +241,92 @@ _NLP_DENYLIST = {
     "monday", "tuesday", "wednesday", "thursday", "friday", "saturday",
     "sunday", "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug",
     "sep", "oct", "nov", "dec",
+    # Common English nouns / verbs / pronouns that NER misfires on when
+    # they appear capitalised (sentence starts, bullet headers, table
+    # cells, markdown sections). Saw these in real validator reports
+    # generated from nmap output → model reply → re-sanitization on
+    # next turn, where the model writes things like "Network", "DDoS",
+    # "None identified", "Investigate whether…" in narrative.
+    #
+    # Single words:
+    "network", "networks", "system", "systems", "service", "services",
+    "server", "servers", "client", "clients", "host", "hosts", "target",
+    "targets", "source", "sources", "scan", "scans", "port", "ports",
+    "attempt", "attempts", "attempted", "failure", "error", "errors",
+    "none", "unknown", "unspecified", "undefined", "default", "custom",
+    "investigate", "verify", "confirm", "check", "review", "monitor",
+    "analyze", "analyse", "identify", "examine", "probe", "test",
+    "recommend", "consider", "evaluate", "validate", "audit",
+    "remediation", "mitigation", "exposure", "vulnerability", "severity",
+    "critical", "high", "medium", "low", "info", "informational",
+    "finding", "findings", "evidence", "indicator", "indicators",
+    "summary", "executive", "technical", "report", "reports",
+    "credentials", "credential", "session", "sessions",
+    "request", "requests", "response", "responses", "header", "headers",
+    "payload", "payloads", "traffic", "outbound", "inbound",
+    "infrastructure", "perimeter", "boundary", "interface", "interfaces",
+    # Security acronyms / classifications that NER often promotes to ORG:
+    "ddos", "dos", "mitm", "rce", "lfi", "rfi", "ssrf", "xxe", "csrf",
+    "xss", "sqli", "tls", "ssl", "vpn", "saas", "iaas", "paas",
+    # Multi-word phrases NER fires on in pentest narrative:
+    "investigate whether", "investigate further", "consider whether",
+    "verify whether", "confirm whether", "check whether",
+    "none identified", "none observed", "none detected", "none reported",
+    "not applicable", "not available", "not observed", "not identified",
+    "no findings", "no evidence", "no indication",
+    "scan failed", "scan failure", "scan timed out", "scan aborted",
+    "scan inconclusive", "scan interference", "scan obstruction",
+    "scan incomplete", "scan blocked", "scan terminated",
+    "executive summary", "key findings", "critical finding",
+    "potential exploitation", "potential compromise",
+    "external scan", "external assessment", "external recon",
+    "external vulnerability", "external reconnaissance",
+    "vulnerability assessment", "security assessment",
+    # MITRE ATT&CK style tactic / sub-tactic headers — model loves to
+    # use these as bullet headings in pentest reports and NER tags
+    # them as ORG / PERSON.
+    "initial access", "execution", "persistence", "privilege escalation",
+    "defense evasion", "credential access", "discovery",
+    "lateral movement", "collection", "command and control",
+    "exfiltration", "impact", "reconnaissance", "follow-up",
+    "follow-up reconnaissance", "service enumeration",
+    "host enumeration", "port enumeration", "vulnerability scanning",
+    "active reconnaissance", "passive reconnaissance",
+    "post-exploitation", "post exploitation",
+    "remediation steps", "next steps", "next moves", "next actions",
+    "immediate action", "immediate next steps", "recommended actions",
+    "tcp/udp", "tcp connect", "udp scan", "syn scan",
+    # Generic report-section / pentest-narrative headers the model
+    # writes that NER tags as ORG.
+    "key findings", "recommended next", "follow-up actions",
+    "additional checks", "additional findings", "open questions",
+    "scope notes", "engagement notes", "test results", "test plan",
+    # DNS record types — model writes them as "NS servers", "MX
+    # records" and NER lifts them to ORG.
+    "ns servers", "ns server", "ns record", "ns records",
+    "mx records", "mx record", "a records", "a record",
+    "aaaa record", "aaaa records", "cname", "cname records",
+    "txt record", "txt records", "ptr record", "ptr records",
+    "soa record", "srv record", "caa record",
+    # Common third-person singular verbs spaCy promotes to PERSON
+    # when capitalised at the start of a bullet.
+    "suggests", "indicates", "confirms", "reveals", "exposes",
+    "provides", "includes", "involves", "appears", "seems",
+    "shows", "highlights", "demonstrates", "implies", "denotes",
+    "represents", "describes", "explains", "depicts", "covers",
+    "contains", "matches", "tracks", "monitors", "detects",
+    "identifies", "discovers", "enumerates", "extracts", "captures",
+    "produces", "generates", "creates", "returns", "yields",
+    # Pentest-narrative subjects + adjectives the model uses as topic
+    # headers or sentence subjects.
+    "attacker", "attackers", "defender", "defenders", "victim",
+    "intruder", "adversary", "operator", "operators",
+    "subdomain enumeration", "directory enumeration",
+    "service enumeration", "user enumeration",
+    "direct", "indirect", "internal scan", "external scan",
+    "asset inventory", "attack surface", "threat model",
+    # Cert transparency / OSINT services we treat as well-known
+    # infra; allowlisted in _PUBLIC_HOST_ALLOWLIST below as well.
 }
 
 
@@ -565,6 +675,19 @@ _PUBLIC_HOST_ALLOWLIST = {
     "owasp.org",
     "mitre.org",
     "nist.gov",
+    # IANA-reserved documentation domains (RFC 2606). Treating them as
+    # public lets the proxy ignore self-references — without this, when
+    # the model writes "example.com" in its reply we sanitize it into
+    # `charlie.example.com` (a brand-new fake from our own pool), which
+    # is absurd and pollutes the mapping table.
+    "example.com", "example.net", "example.org",
+    "example.edu", "example",
+    # OSINT / cert-transparency / pentest infra that the model
+    # routinely references in recon analysis — there's no privacy
+    # benefit to redacting these and Claude is more useful with the
+    # real name in scope.
+    "crt.sh", "shodan.io", "censys.io", "virustotal.com",
+    "abuseipdb.com", "haveibeenpwned.com",
 }
 
 
@@ -595,7 +718,35 @@ def _looks_like_real_name_or_org(value: str) -> bool:
     s = value.strip(" .,;:'\"")
     if len(s) < 3:
         return False
-    if s.lower() in _NLP_DENYLIST:
+    # Real person names and org names are short. Anything over ~60
+    # chars is a sentence fragment NER mis-classified ("Direct IP-based
+    # scanning if the attacker obtains the IP through other means" →
+    # Nordhaven Holdings is the canonical example).
+    if len(s) > 60:
+        return False
+    # Same intuition by word count — real names are 1–5 tokens. Beyond
+    # that we're almost certainly looking at a clause, not a name.
+    if len(s.split()) > 5:
+        return False
+    low = s.lower()
+    if low in _NLP_DENYLIST:
+        return False
+    # Reject multi-word phrases whose FIRST token is a common English
+    # word in the denylist — real names/orgs don't start with verbs
+    # ("Investigate whether"), pronouns ("None reported"), or generic
+    # nouns ("Network outage", "Scan blocked"). This catches the long
+    # tail of NER false positives without needing every exact phrase
+    # in the denylist.
+    first_token = low.split(" ", 1)[0]
+    if " " in low and first_token in _NLP_DENYLIST:
+        return False
+    # Reject single-token detections that end in -ing or -tion. These
+    # are gerunds / abstract nouns ("Enumeration", "Scanning",
+    # "Reconnaissance", "Mitigation") that pentest reports use as
+    # bullet headers — never proper nouns.
+    if " " not in s and len(s) >= 5 and (
+        low.endswith("ing") or low.endswith("tion") or low.endswith("ment")
+    ):
         return False
     if any(c in _NAME_FORBIDDEN_CHARS for c in s):
         return False
@@ -777,6 +928,15 @@ class Sanitizer:
             # url
             return f"{scheme}{fake_host}{rest}" if scheme else f"{fake_host}{rest}"
 
+        # Skip IPs that are already inside one of our reserved fake
+        # ranges (see `_FAKE_IPV4_PREFIXES` / `_FAKE_IPV6_PREFIX`).
+        # The model commonly echoes these back when discussing the
+        # redaction convention, and sanitizing them again would mint
+        # 198.51.100.2 → 198.51.100.3 mappings that pollute the table
+        # and make desanitize cycle on its own fakes.
+        if _is_synthetic_ip(real, kind):
+            return real
+
         # Single-token person / org detections that match the leftmost
         # label of an already-mapped hostname are almost certainly
         # references to the same entity by its bare brand name
@@ -830,25 +990,17 @@ class Sanitizer:
             return f"FAKEIBAN{n:016d}"
 
         if kind == "ipv4":
-            # RFC 5737 — documentation-only block. Loopback (127.0.0.x)
-            # makes the model reason about "localhost logins" and
-            # silently changes the semantics of the analysis. Use the
-            # documentation block instead: the model treats it as an
-            # opaque example address.
-            #
-            # 198.51.100.0/24 → 254 unique fakes; if the session somehow
-            # blows past that, wrap into 203.0.113.0/24.
+            # RFC 5737 documentation block, see _FAKE_IPV4_PREFIXES.
+            # First /24 gives 254 unique fakes; if the session blows
+            # past that, wrap into the second /24 (203.0.113.0/24).
+            primary, fallback = _FAKE_IPV4_PREFIXES
             if n <= 254:
-                return f"198.51.100.{n}"
-            return f"203.0.113.{((n - 1) % 254) + 1}"
+                return f"{primary}{n}"
+            return f"{fallback}{((n - 1) % 254) + 1}"
 
         if kind == "ipv6":
-            # RFC 3849 — documentation range 2001:db8::/32. Returning a
-            # constant ::1 (loopback) for every detection broke the
-            # 1:1 mapping the moment a session contained more than one
-            # IPv6 address, AND made the model reason about loopback
-            # semantics.
-            return f"2001:db8::{n:x}"
+            # RFC 3849 documentation range, see _FAKE_IPV6_PREFIX.
+            return f"{_FAKE_IPV6_PREFIX}:{n:x}"
 
         # host_port handled in the shared block above
 
@@ -907,6 +1059,17 @@ class Sanitizer:
                 continue
             for r in results:
                 value = text[r.start:r.end]
+                # Universal denylist guard — applies regardless of which
+                # entity type Presidio assigned. spaCy mis-tags `tcp`
+                # as NRP, `Network` as ORG, `Investigate whether` as
+                # PERSON; if the bare lowercase value (or its first
+                # token, for multi-word phrases) is in our denylist,
+                # don't sanitize it.
+                low_val = value.lower().strip(" .,;:'\"")
+                if low_val in _NLP_DENYLIST:
+                    continue
+                if " " in low_val and low_val.split(" ", 1)[0] in _NLP_DENYLIST:
+                    continue
                 if r.entity_type in ("PERSON", "ORGANIZATION") and \
                         not _looks_like_real_name_or_org(value):
                     continue
@@ -916,6 +1079,15 @@ class Sanitizer:
                 if r.entity_type == "PHONE_NUMBER" and \
                         _CC_4x4_RE.fullmatch(value.strip()):
                     continue
+                # Same recognizer also fires on IPv4 addresses with
+                # punctuation noise — saw `(168.181.187.168` matched as
+                # PHONE in nmap output. Reject when stripping
+                # non-digit/dot leaves a valid four-octet shape; the
+                # IPv4 detector below handles it correctly.
+                if r.entity_type == "PHONE_NUMBER":
+                    stripped = re.sub(r"[^\d.]", "", value)
+                    if re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}", stripped):
+                        continue
                 # Presidio's URL recognizer is overly greedy in two
                 # opposite directions:
                 #
