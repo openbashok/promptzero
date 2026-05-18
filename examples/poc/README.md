@@ -235,6 +235,44 @@ python demo_claude.py --out demo-transcript.txt
 
 Tareas disponibles (`--task`): `technical` | `executive` | `summary` | `triage`.
 
+### `integration_test.py` — Suite de invariantes contra Claude real
+
+Drives 6 escenarios (single-turn + multi-turn) contra el proxy y
+chequea cuatro invariantes por cada uno: **L**eak (no real value
+en upstream), **N**er-recall (todo valor real detectado), **R**ound-trip
+(ningún fake sobrevive al reply), **A**wareness (el modelo no marca
+los datos como sintéticos).
+
+Requiere arrancar el proxy con `DEBUG_AUDIT=1` (el script consulta
+`/sessions/<id>/audit` para verificar el payload sanitizado tal como
+salió):
+
+```bash
+# Terminal 1
+DEBUG_AUDIT=1 python ../../main.py
+
+# Terminal 2 — corrida completa
+python integration_test.py --proxy http://127.0.0.1:8000 \
+                           --model claude-haiku-4-5
+
+# Un solo escenario, con dump del reply
+python integration_test.py --only conversation-history -v
+```
+
+Útil como regression runner después de cualquier cambio al sanitizer
+o como sanity probe antes de meterte en un engagement.
+
+### `fuzz_sanitizer.py` — Property-based fuzzer (offline)
+
+Genera miles de inputs sintéticos con PII embebida y verifica las
+mismas invariantes a nivel sanitizer, sin tocar la API. Útil para
+cazar regresiones rápidas:
+
+```bash
+python fuzz_sanitizer.py --iter 4000        # 4k casos random
+python fuzz_sanitizer.py --seed 123456      # reproducir un caso
+```
+
 ---
 
 ## Lectura recomendada del output
