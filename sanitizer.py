@@ -1153,8 +1153,8 @@ class Sanitizer:
                         _CC_4x4_RE.fullmatch(value.strip()):
                     continue
                 # Same recognizer also fires on IPv4 addresses with
-                # punctuation noise — saw `(168.181.187.168` matched as
-                # PHONE in nmap output. Reject when stripping
+                # punctuation noise — observed `(<ipv4>)` parenthesised
+                # in nmap output matched as PHONE. Reject when stripping
                 # non-digit/dot leaves a valid four-octet shape; the
                 # IPv4 detector below handles it correctly.
                 if r.entity_type == "PHONE_NUMBER":

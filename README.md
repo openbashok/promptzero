@@ -12,7 +12,7 @@
 **Zero Trust architecture for LLM prompts.**
 *Zero trace. Full answer.*
 
-[![Version](https://img.shields.io/badge/version-2.3.0-blue.svg)](https://github.com/openbashok/promptzero)
+[![Version](https://img.shields.io/badge/version-2.5.0-blue.svg)](https://github.com/openbashok/promptzero)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![OpenBash](https://img.shields.io/badge/by-OpenBash.com-red.svg)](https://openbash.com)
