@@ -606,6 +606,15 @@ def _looks_like_real_name_or_org(value: str) -> bool:
     # like "DCSYNC", "DNS", "PROD" are technical, not names.
     if not any(c.islower() for c in s):
         return False
+    # Hostname-shaped strings (`copetel.com.ar`, `vpn.acme.io`) are not
+    # names or organizations. NER occasionally fires PERSON / ORG on
+    # them — most often when an nmap/tool error message returned via
+    # tool_result mentions the host by its bare form ("Copetel is
+    # down"). Accepting them would mint a *second* fake for a value
+    # that the URL/hostname pipeline already mapped, breaking the 1:1
+    # invariant and silently rewriting the model's output.
+    if _VALID_HOST_RE.match(s):
+        return False
     return True
 
 
@@ -677,6 +686,39 @@ class Sanitizer:
     # Fake value generators
     # -----------------------------------------------------------------------
 
+    def _label_alias_from_existing_host(self, value: str) -> Optional[str]:
+        """If `value` is a bare token (one word, no dots) that matches
+        the leftmost label of an already-mapped real hostname, return
+        the leftmost label of the corresponding fake hostname with the
+        casing of the input preserved. Used to keep `Copetel` and
+        `copetel.com.ar` pointing at the same fake even when NER
+        misfires PERSON / ORG on the bare brand name.
+
+        Returns None if there is no match — caller should fall back to
+        the normal fake generator.
+        """
+        v = value.lower()
+        for real_host, fake in self.table._r2f.items():
+            kind = self.table.kinds.get(real_host)
+            if kind not in ("hostname", "url", "host_port"):
+                continue
+            # Strip scheme / path / port from both sides so we compare
+            # bare hosts regardless of how the entry was registered.
+            real_bare = re.sub(r"^https?://", "", real_host, flags=re.I)
+            real_bare = real_bare.split("/", 1)[0].split(":", 1)[0]
+            fake_bare = re.sub(r"^https?://", "", fake, flags=re.I)
+            fake_bare = fake_bare.split("/", 1)[0].split(":", 1)[0]
+            real_label = real_bare.split(".", 1)[0].lower()
+            if real_label != v:
+                continue
+            fake_label = fake_bare.split(".", 1)[0]
+            # Preserve the input's casing so the substitution reads
+            # naturally — `Copetel` → `Alpha`, `copetel` → `alpha`.
+            if value[0].isupper():
+                return fake_label[:1].upper() + fake_label[1:]
+            return fake_label
+        return None
+
     def _make_fake(self, kind: str, real: str) -> str:
         # hostname / host_port / url all reduce to a "real host" entity.
         # Whatever surface form we got (bare host, host:port, full URL),
@@ -734,6 +776,19 @@ class Sanitizer:
                 return f"{fake_host}:{port}"
             # url
             return f"{scheme}{fake_host}{rest}" if scheme else f"{fake_host}{rest}"
+
+        # Single-token person / org detections that match the leftmost
+        # label of an already-mapped hostname are almost certainly
+        # references to the same entity by its bare brand name
+        # (`Copetel` in an nmap error message after we already mapped
+        # `copetel.com.ar`). Returning a fresh `Soren Brännström`-style
+        # fake here would mint a second alias for the same real entity
+        # and let the desanitizer rewrite the wrong span. Reuse the
+        # corresponding label of the existing fake instead.
+        if kind in ("person", "org") and " " not in real and "." not in real:
+            alias = self._label_alias_from_existing_host(real)
+            if alias is not None:
+                return alias
 
         n = self.table.next_count(kind)
 
