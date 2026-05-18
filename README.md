@@ -516,6 +516,51 @@ for the long-form rationale on why we landed here.
 
 ---
 
+## Pentest mode (disable NER PERSON / ORG)
+
+After running the validator across real targets we measured where
+sanitization false positives actually come from. The breakdown is
+asymmetric:
+
+| Detector class | Bugs surfaced in this codebase | Why |
+|---|---|---|
+| Regex (IPv4, IPv6, hostnames, emails, tokens, credentials, country IDs) | ~5, all closed by pattern tweaks | Patterns are tight; either the shape matches or it doesn't |
+| NER **PERSON / ORGANIZATION** | 15+ recurring (`Banner`, `ACLs`, `However`, `Investigate whether`, `Direct IP-based scanning…`, `Network`, `Attempt`, …) | spaCy was trained on news / web text; pentest vocabulary (gobuster, ffuf, ACLs, Reconnaissance, …) wasn't in the corpus, so every capitalised English word at a bullet start risks misfiring |
+
+For pentest workflows the input is mostly tool output (`nmap`,
+`gobuster`, `sqlmap`, Burp HTTP history) and code — content where
+PERSON / ORG detection contributes ~0 actual privacy value and 100% of
+the false-positive noise. The proxy ships a switch to drop those two
+entity classes entirely:
+
+```bash
+DETECT_PERSON_ORG=1    # default — full NER pipeline
+DETECT_PERSON_ORG=0    # pentest mode — drop PERSON / ORG, keep everything else
+```
+
+What stays intact when off: IPv4, IPv6, hostnames, URLs, host:port,
+emails, country-specific national IDs (AR/CL/ES/UY/CO/MX), credit
+cards, IBAN, SSN, phones, API tokens, key-aware credentials. What
+goes away: detection of standalone person / organization names in
+free-form narrative.
+
+`GET /health` reports the current value:
+
+```json
+{ "status": "ok", "detect_person_org": false, … }
+```
+
+When to use which mode:
+
+- **`DETECT_PERSON_ORG=1`** (default) — incident reports, document
+  summaries, customer-support transcripts, anything written by
+  humans where you want auditor / contact / client names redacted.
+- **`DETECT_PERSON_ORG=0`** — driving Claude Code through the proxy
+  for active pentest engagements, log triage, code review on shell
+  output, automated tooling that produces structured technical text.
+
+---
+
 ## Integration test suite
 
 `examples/poc/integration_test.py` drives real Claude calls through the
@@ -1179,6 +1224,51 @@ INJECT_SYSTEM_HINT=0    # off — útil para benchmark o si tu cliente
 
 Ver [Notas de diseño](#notas-de-diseño--por-qué-examplecom--system-hint)
 para el razonamiento completo de por qué llegamos a esta combinación.
+
+---
+
+## Modo pentest (deshabilitar NER PERSON / ORG)
+
+Después de validar contra targets reales medimos de dónde vienen los
+false positives. La distribución es asimétrica:
+
+| Capa de detección | Bugs encontrados en este repo | Por qué |
+|---|---|---|
+| Regex (IPv4, IPv6, hostnames, emails, tokens, credenciales, IDs nacionales) | ~5, todos cerrados con tweaks de pattern | Patrones estrictos: o el shape matchea o no |
+| NER **PERSON / ORGANIZATION** | 15+ recurrentes (`Banner`, `ACLs`, `However`, `Investigate whether`, `Direct IP-based scanning…`, `Network`, `Attempt`, …) | spaCy fue entrenado con prosa periodística / web; el vocabulario pentest (gobuster, ffuf, ACLs, Reconnaissance, …) no está en su corpus, así que cada palabra capitalizada al inicio de bullet point puede dispararse como PERSON/ORG |
+
+Para workflows de pentest el input es mayormente output de
+herramientas (`nmap`, `gobuster`, `sqlmap`, Burp HTTP history) y
+código — contenido donde detectar PERSON/ORG aporta ~0 valor real de
+privacidad y 100% del ruido de FPs. El proxy expone un switch para
+descartar esas dos clases:
+
+```bash
+DETECT_PERSON_ORG=1    # default — pipeline NER completo
+DETECT_PERSON_ORG=0    # modo pentest — drop PERSON / ORG, todo lo demás sigue
+```
+
+Qué sigue funcionando con el flag en off: IPv4, IPv6, hostnames,
+URLs, host:port, emails, IDs nacionales (AR/CL/ES/UY/CO/MX),
+tarjetas de crédito, IBAN, SSN, teléfonos, API tokens, credenciales
+key-aware. Qué deja de detectarse: nombres de personas /
+organizaciones en narrativa libre.
+
+`GET /health` reporta el valor activo:
+
+```json
+{ "status": "ok", "detect_person_org": false, … }
+```
+
+Cuándo usar cada modo:
+
+- **`DETECT_PERSON_ORG=1`** (default) — incident reports, document
+  summaries, chats de soporte, cualquier cosa escrita por humanos
+  donde querés redactar nombres de auditor / contacto / cliente.
+- **`DETECT_PERSON_ORG=0`** — Claude Code apuntando al proxy para
+  engagements de pentest activo, triage de logs, code review sobre
+  shell output, herramientas automatizadas que producen texto
+  técnico estructurado.
 
 ---
 

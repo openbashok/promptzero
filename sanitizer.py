@@ -887,8 +887,16 @@ class MappingTable:
 class Sanitizer:
     """One instance per session."""
 
-    def __init__(self):
+    def __init__(self, detect_person_org: bool = True):
         self.table = MappingTable()
+        # When False, PERSON / ORGANIZATION are stripped from the NLP
+        # entity list before each scan. Everything else (regex IPs /
+        # hostnames / emails / tokens / credentials / country IDs)
+        # continues to fire. Pentest-mode use case: tool output and
+        # code rarely contain personal names anyway and the NER FP
+        # rate dominates the value, so disabling cleans the mapping
+        # table of `Banner / However / ACLs / Investigate` noise.
+        self.detect_person_org = detect_person_org
 
     # -----------------------------------------------------------------------
     # Fake value generators
@@ -1102,13 +1110,21 @@ class Sanitizer:
         analyzer = _get_analyzer()
         if not analyzer:
             return []
+        # Strip PERSON / ORGANIZATION from the entity list when the
+        # session was opened with detect_person_org=False. Regex-based
+        # detection (IPs, hostnames, emails, tokens, credentials,
+        # country IDs) is unaffected.
+        entities = list(_NLP_ENTITIES)
+        if not self.detect_person_org:
+            entities = [e for e in entities
+                        if e not in ("PERSON", "ORGANIZATION")]
         hits: List[Tuple[int, int, str, str]] = []
         for lang in (_nlp_languages or ["en"]):
             try:
                 results = analyzer.analyze(
                     text=text,
                     language=lang,
-                    entities=_NLP_ENTITIES,
+                    entities=entities,
                     score_threshold=_NLP_MIN_SCORE,
                 )
             except Exception as exc:

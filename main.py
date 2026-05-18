@@ -71,6 +71,20 @@ INJECT_SYSTEM_HINT = os.getenv("INJECT_SYSTEM_HINT", "1").lower() not in (
     "0", "false", "no", "off",
 )
 
+# Run NER on PERSON / ORGANIZATION entities. Default on. For pentest
+# workflows where the input is mostly tool output (nmap, ffuf, sqlmap,
+# burp) and code, NER PERSON/ORG is the #1 source of false positives —
+# pentest vocabulary (Banner, ACLs, Investigate, Reconnaissance,
+# Direct, Network, Attacker, …) wasn't in spaCy's training corpus and
+# every capitalised English word at a bullet start risks misfiring.
+# Disabling drops these two entity types entirely; everything else
+# (regex IPv4/IPv6, hostnames, emails, tokens, credentials,
+# country-specific IDs) keeps working. Regex-based detection is
+# essentially FP-free in practice.
+DETECT_PERSON_ORG = os.getenv("DETECT_PERSON_ORG", "1").lower() not in (
+    "0", "false", "no", "off",
+)
+
 
 def _httpx_client(**extra) -> httpx.AsyncClient:
     """Build an httpx.AsyncClient pre-wired with the configured upstream
@@ -132,7 +146,7 @@ _sessions: dict[str, Sanitizer] = {}
 
 def _get_session(session_id: str) -> Sanitizer:
     if session_id not in _sessions:
-        _sessions[session_id] = Sanitizer()
+        _sessions[session_id] = Sanitizer(detect_person_org=DETECT_PERSON_ORG)
     return _sessions[session_id]
 
 
@@ -255,6 +269,7 @@ async def health():
             else (True if UPSTREAM_VERIFY else False)
         ),
         "inject_system_hint": INJECT_SYSTEM_HINT,
+        "detect_person_org": DETECT_PERSON_ORG,
     }
 
 
