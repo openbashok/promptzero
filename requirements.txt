@@ -7,4 +7,4 @@ spacy>=3.7.0
 # Anthropic SDK — used by the PoC scripts (demo_claude.py, demo_html.py,
 # diagnose_upstream.py) and by the example clients under examples/. Adding
 # it here so a single `./setup.sh` lands a fully working environment.
-anthropic>=0.30.0
+anthropic>=0.102.0
