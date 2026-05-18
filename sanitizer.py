@@ -321,6 +321,8 @@ _NLP_DENYLIST = {
     # headers or sentence subjects.
     "attacker", "attackers", "defender", "defenders", "victim",
     "intruder", "adversary", "operator", "operators",
+    "banner", "banners", "fingerprint", "fingerprints",
+    "footprint", "footprints", "signature", "signatures",
     "subdomain enumeration", "directory enumeration",
     "service enumeration", "user enumeration",
     "direct", "indirect", "internal scan", "external scan",
