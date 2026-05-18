@@ -51,12 +51,13 @@ _FAKE_ORGS = [
     "Cyberdyne Systems",
 ]
 
-# Pool of visually distinct hostname stems. Each gets `.localhost` appended
-# so the synthetic value still resolves to loopback (RFC 6761) — semantically
-# "this is internal lab infrastructure" — but each individual host has a
-# unique, easy-to-distinguish name. Avoids the previous failure mode where
-# localhost.localdomain.1, localhost.localdomain.2, … were so similar the
-# model conflated them or interpolated suffixes like "nexabank.local1".
+# Pool of visually distinct hostname stems. Each gets `.example.com`
+# appended — RFC 2606 reserves example.com for documentation, which the
+# model recognises as "placeholder, no real-world facts apply" without
+# the localhost/loopback semantics that `.localhost` carries (RFC 6761).
+# Loopback-flavoured fakes were causing Claude to downgrade the
+# criticality of external pentest findings ("internal-only host, lower
+# exposure") even when the real input was an internet-facing service.
 _FAKE_HOST_STEMS = [
     # NATO phonetic alphabet (26)
     "alpha", "bravo", "charlie", "delta", "echo", "foxtrot",
@@ -665,7 +666,7 @@ class Sanitizer:
         # extract the host, look up (or mint) one fake host for it, and
         # reuse the same fake host in every other surface form in the
         # same session. This guarantees coherence: a single real hostname
-        # like nike.com always sees the same fake (e.g. alpha.localhost)
+        # like nike.com always sees the same fake (e.g. alpha.example.com)
         # whether it appears as a bare reference, inside a URL, or with a
         # port — which is what makes desanitize() correctly restore the
         # LLM's free-form mentions of the host alone.
@@ -707,7 +708,7 @@ class Sanitizer:
             fake_host = self.table.get_fake(real_host)
             if fake_host is None:
                 host_n = self.table.next_count("_host_pool")
-                fake_host = f"{_fake_host_stem(host_n)}.localhost"
+                fake_host = f"{_fake_host_stem(host_n)}.example.com"
                 self.table.register(real_host, fake_host, "hostname")
 
             if kind == "hostname":
@@ -780,7 +781,7 @@ class Sanitizer:
         # host_port handled in the shared block above
 
         if kind == "email":
-            return f"user{n:03d}@fakecorp.local"
+            return f"user{n:03d}@example.com"
 
         if kind == "phone":
             return f"+1-555-000-{n:04d}"
