@@ -117,14 +117,16 @@ _NLP_DENYLIST = {
     # Protocols / standards
     "http", "https", "tls", "ssl", "ssh", "smtp", "imap", "pop3", "dns",
     "tcp", "udp", "ftp", "sftp", "ldap", "rdp", "smb", "ntp", "snmp",
+    "icmp", "arp", "mqtt", "sip", "rtp", "rtcp", "ipsec", "wireguard",
     # Web / API
     "api", "rest", "graphql", "json", "yaml", "xml", "html", "css", "dom",
     "csrf", "xss", "cors", "csp", "saml", "oauth", "openid", "oidc", "jwt",
-    "url", "uri", "urn",
+    "url", "uri", "urn", "sse", "websocket", "grpc", "soap", "rpc",
     # Security
     "rce", "lfi", "rfi", "ssrf", "xxe", "ssti", "sqli", "idor", "mfa",
     "totp", "cve", "cvss", "cwe", "owasp", "pii", "gdpr", "pci", "pci-dss",
     "soc", "siem", "edr", "xdr", "mdr", "waf", "ids", "ips", "rbac",
+    "tlp", "iam", "kev", "epss", "capec", "stride", "mitre", "att&ck",
     # Roles / titles
     "ciso", "cto", "ceo", "cfo", "coo", "cio", "vp", "dpo", "soc",
     # Servers / databases / frameworks
@@ -144,6 +146,40 @@ _NLP_DENYLIST = {
     "active directory", "credential guard", "lsa", "lsa protection",
     "preparedstatement", "xmlconstants", "swagger", "openapi", "vue",
     "gecko", "khtml", "webkit", "blink", "fortinet", "content-security-policy",
+    # Pentesting tools — the model writes these inside Bash() tool calls
+    # and they MUST come through verbatim or commands break ("openssl"
+    # → some-fake-name turns into invalid CLI input on the host).
+    "nmap", "masscan", "rustscan", "zmap", "naabu", "amass", "subfinder",
+    "assetfinder", "findomain", "dnsx", "shuffledns", "puredns", "ffuf",
+    "wfuzz", "gobuster", "feroxbuster", "dirb", "dirsearch", "kiterunner",
+    "nikto", "wapiti", "skipfish", "arachni", "nuclei", "httpx", "katana",
+    "gospider", "gau", "waybackurls", "hakrawler", "sqlmap", "ghauri",
+    "xsstrike", "xsshunter", "commix", "wpscan", "joomscan", "droopescan",
+    "nessus", "openvas", "qualys", "burp", "burpsuite", "zap", "mitmproxy",
+    "wireshark", "tshark", "tcpdump", "ettercap", "bettercap", "responder",
+    "impacket", "crackmapexec", "netexec", "bloodhound", "rubeus", "mimikatz",
+    "evilginx", "metasploit", "msfconsole", "msfvenom", "armitage", "cobalt",
+    "empire", "covenant", "havoc", "sliver", "merlin", "powersploit",
+    "nishang", "powerview", "adexplorer", "snaffler", "seatbelt", "winpeas",
+    "linpeas", "linenum", "pspy", "chisel", "ligolo", "ssf", "frp",
+    "ngrok", "rsockstun", "socat", "iodine", "dnscat", "dnscat2",
+    "john", "hashcat", "hashid", "hash-identifier", "ophcrack", "hydra",
+    "medusa", "patator", "ncrack", "thc-hydra",
+    # General-purpose CLI tools the model invokes in Bash() calls
+    "curl", "wget", "httpie", "openssl", "gpg", "ssh-keygen", "ssh-keyscan",
+    "ssh-audit", "dig", "host", "nslookup", "drill", "kdig", "ping",
+    "traceroute", "mtr", "fping", "hping", "hping3", "nc", "netcat",
+    "ncat", "socat", "telnet", "ftp", "scp", "rsync", "sftp", "tftp",
+    "testssl", "testssl.sh", "sslyze", "sslscan", "tlssled", "cipherscan",
+    "jq", "yq", "xq", "fx", "fzf", "rg", "ripgrep", "ag", "ack",
+    "grep", "egrep", "fgrep", "sed", "awk", "tr", "cut", "sort", "uniq",
+    "head", "tail", "cat", "tac", "less", "more", "find", "fd", "tree",
+    "ls", "wc", "stat", "file", "strings", "xxd", "hexdump", "od",
+    "git", "svn", "hg", "fossil", "make", "cmake", "ninja", "bazel",
+    "docker", "podman", "kubectl", "helm", "skopeo", "buildah", "crane",
+    "terraform", "ansible", "salt", "puppet", "chef", "vault",
+    # Common nmap/scanner flags that NLP sometimes tags
+    "axfr", "version.bind", "version.bind.", "s_client", "s_server",
     # Common English verbs/adjectives spaCy tags as PERSON
     "internal", "external", "accept", "domain", "forge", "engage",
     "notify", "read", "encode", "arbitrary", "unauthenticated", "thu",
@@ -155,6 +191,14 @@ _NLP_DENYLIST = {
     "vp of engineering", "sql injection", "blind & union", "customer portal",
     "internal port-scan via ssrf", "summer2023", "welcomenexabank",
     "enable lsa protection", "suspected ssti",
+    # Common multi-word phrases NLP tags as ORG in security text
+    "host header", "user agent", "content type", "set cookie",
+    "session token", "stack trace", "race condition", "buffer overflow",
+    "heap overflow", "use after free", "double free",
+    # Time/date words spaCy sometimes tags as PERSON
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday",
+    "sunday", "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug",
+    "sep", "oct", "nov", "dec",
 }
 
 
