@@ -649,6 +649,43 @@ _NAME_FORBIDDEN_CHARS = set("0123456789/:<>[]{}()*=+\\|`~^_;\"")
 _VALID_HOST_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9\-]*(?:\.[A-Za-z0-9][A-Za-z0-9\-]*)+$")
 
 
+# A real person/organization name is never a single common English
+# stop word or sentence-starter. We pull spaCy's stop-word list (and
+# fall back to a hand-curated set if spaCy isn't loaded) and use it as
+# an additional rejection signal inside `_looks_like_real_name_or_org`.
+# This catches the long tail of NER false positives (However, ACLs,
+# Therefore, Furthermore, Notably, …) without enumerating every word
+# by hand in the explicit `_NLP_DENYLIST`.
+_STOP_WORDS_FALLBACK = {
+    # English transition / connective words that NER promotes when
+    # they start a sentence or bullet.
+    "however", "therefore", "furthermore", "moreover", "nevertheless",
+    "nonetheless", "additionally", "consequently", "subsequently",
+    "specifically", "particularly", "notably", "indeed", "thus",
+    "hence", "accordingly", "alternatively", "regardless", "instead",
+    "meanwhile", "likewise", "conversely", "similarly", "rather",
+    "otherwise", "essentially", "primarily", "generally", "typically",
+    "usually", "often", "always", "sometimes", "never", "rarely",
+}
+
+
+def _load_stop_words() -> set:
+    """Return spaCy's English + Spanish stop-word lists merged with a
+    small hand-curated fallback. Memoised at module import time."""
+    out: set = set(_STOP_WORDS_FALLBACK)
+    try:
+        from spacy.lang.en.stop_words import STOP_WORDS as EN
+        from spacy.lang.es.stop_words import STOP_WORDS as ES
+        out |= {w.lower() for w in EN}
+        out |= {w.lower() for w in ES}
+    except Exception:
+        pass
+    return out
+
+
+_STOP_WORDS = _load_stop_words()
+
+
 # Public infrastructure referenced by Claude Code's system prompt and by
 # generic tool output. None of these are private to the user — sanitizing
 # them just degrades the model's context with synthetic placeholders for
@@ -749,6 +786,24 @@ def _looks_like_real_name_or_org(value: str) -> bool:
     if " " not in s and len(s) >= 5 and (
         low.endswith("ing") or low.endswith("tion") or low.endswith("ment")
     ):
+        return False
+    # Single-token detections that match a spaCy stop word are almost
+    # always discourse markers (However, Therefore, Furthermore,
+    # Notably, …) that NER mistakenly promotes to PERSON / ORG at the
+    # start of a sentence. Cuts the FP long tail without explicit
+    # enumeration in the manual denylist.
+    if " " not in s and low in _STOP_WORDS:
+        return False
+    # Single short upper-case acronym (≤4 chars, all uppercase) is
+    # essentially never a real name — covers ACLs, DDoS, RCE, RBAC,
+    # IAM, SIEM, EDR, ATT&CK, etc. Real org abbreviations like "IBM"
+    # would also match, but pentest narrative is dominated by tech
+    # acronyms and the cost of an occasional miss is acceptable.
+    if " " not in s and len(s) <= 5 and s.isupper():
+        return False
+    # Plural-acronym form: "ACLs", "WAFs", "VPNs", "APIs" — capital
+    # letters only except for a trailing lowercase 's'.
+    if " " not in s and len(s) <= 6 and s.endswith("s") and s[:-1].isupper():
         return False
     if any(c in _NAME_FORBIDDEN_CHARS for c in s):
         return False
