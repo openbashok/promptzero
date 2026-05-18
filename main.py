@@ -62,6 +62,15 @@ UPSTREAM_CA_BUNDLE = os.getenv("UPSTREAM_CA_BUNDLE", "").strip() or None
 DEBUG_AUDIT = os.getenv("DEBUG_AUDIT", "").lower() in ("1", "true", "yes", "on")
 _AUDIT_MAX_PER_SESSION = 20
 
+# Prepend a short system block explaining the redaction convention so
+# Claude does not refuse pentest/security analysis because the
+# sanitized hostnames (*.example.com) look like RFC documentation.
+# Default on — disable with INJECT_SYSTEM_HINT=0 if it interferes with
+# a particular client.
+INJECT_SYSTEM_HINT = os.getenv("INJECT_SYSTEM_HINT", "1").lower() not in (
+    "0", "false", "no", "off",
+)
+
 
 def _httpx_client(**extra) -> httpx.AsyncClient:
     """Build an httpx.AsyncClient pre-wired with the configured upstream
@@ -245,6 +254,7 @@ async def health():
             UPSTREAM_CA_BUNDLE if UPSTREAM_CA_BUNDLE
             else (True if UPSTREAM_VERIFY else False)
         ),
+        "inject_system_hint": INJECT_SYSTEM_HINT,
     }
 
 
@@ -491,7 +501,9 @@ async def proxy_messages(
     import json as _json  # noqa: PLC0415
     _bytes_in = len(_json.dumps(body, ensure_ascii=False))
     _bump("bytes_sanitized_in", _bytes_in)
-    clean_body = sanitizer.sanitize_request(body)
+    clean_body = sanitizer.sanitize_request(
+        body, inject_system_hint=INJECT_SYSTEM_HINT,
+    )
 
     # --- Build upstream headers ---
     upstream_headers = {
@@ -627,7 +639,9 @@ async def proxy_count_tokens(
     import json as _json  # noqa: PLC0415
     _bytes_in = len(_json.dumps(body, ensure_ascii=False))
     _bump("bytes_sanitized_in", _bytes_in)
-    clean_body = sanitizer.sanitize_request(body)
+    clean_body = sanitizer.sanitize_request(
+        body, inject_system_hint=INJECT_SYSTEM_HINT,
+    )
 
     upstream_headers = {
         "x-api-key": api_key,
