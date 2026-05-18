@@ -421,7 +421,7 @@ _REGEX_PATTERNS: List[Tuple[str, re.Pattern]] = [
     # Hostnames / FQDNs — broadened TLD list incl. LATAM ccTLDs
     # ------------------------------------------------------------------
 
-    ("hostname", re.compile(
+    ("hostname", _HOSTNAME_RE := re.compile(
         r'\b(?:[A-Za-z0-9](?:[A-Za-z0-9\-]{0,61}[A-Za-z0-9])?\.)'
         r'+(?:com|net|org|edu|gov|mil|io|co|uk|de|fr|es|it|ru|cn|jp|'
         r'br|au|ca|mx|cl|ar|uy|pe|ve|ec|bo|py|cr|gt|hn|ni|pa|do|cu|pr|'
@@ -453,6 +453,51 @@ _REGEX_PATTERNS: List[Tuple[str, re.Pattern]] = [
         r"\b(?=[A-Za-z0-9_\-]{32,}\b)(?=[A-Za-z0-9_\-]*[A-Z])"
         r"(?=[A-Za-z0-9_\-]*\d)[A-Za-z0-9_\-]+\b"
     )),
+]
+
+
+# ---------------------------------------------------------------------------
+# Credential-key patterns
+#
+# The token regex only catches very long opaque strings (≥32 chars). Real
+# passwords are often shorter — `S3cur3P@ss!2026`, `Tr0ub4dor&3`, etc. —
+# and would reach the upstream LLM in clear if we relied on the token
+# regex alone. These patterns scan for the *key* (`password=`,
+# `"secret":`, `Authorization: Bearer`) and capture the value, so the
+# detector can replace just the credential value with a fake token
+# without mangling the surrounding key name.
+#
+# Stored as (kind, regex, group_name) tuples — `group_name` is the named
+# capture group whose span should be replaced (the credential value
+# itself, not the literal `password=` prefix).
+# ---------------------------------------------------------------------------
+
+_CREDENTIAL_KV_RE = re.compile(
+    r"""
+    \b
+    (?:password|passwd|pwd|secret|api[_-]?key|apikey
+      |access[_-]?token|auth[_-]?token|admin[_-]?token
+      |client[_-]?secret|private[_-]?key)
+    \s*[:=]\s*
+    (?:["']?)                              # optional quote
+    (?P<value>[^\s"'`,;)\}\]]{6,})         # the credential value
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+_CREDENTIAL_HEADER_RE = re.compile(
+    r"""
+    \b(?:authorization|x-(?:admin|auth|api)[\-_]?(?:token|key)?)
+    \s*:\s*
+    (?:Bearer\s+|Token\s+|Basic\s+)?
+    (?P<value>[A-Za-z0-9._+/=\-]{12,})
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+_REGEX_PATTERNS_GROUPED = [
+    ("credential", _CREDENTIAL_KV_RE, "value"),
+    ("credential", _CREDENTIAL_HEADER_RE, "value"),
 ]
 
 # ---------------------------------------------------------------------------
@@ -712,11 +757,25 @@ class Sanitizer:
             return f"FAKEIBAN{n:016d}"
 
         if kind == "ipv4":
-            # Pentesting-friendly: loopback range 127.0.0.x
-            return f"127.0.0.{min(n, 254)}"
+            # RFC 5737 — documentation-only block. Loopback (127.0.0.x)
+            # makes the model reason about "localhost logins" and
+            # silently changes the semantics of the analysis. Use the
+            # documentation block instead: the model treats it as an
+            # opaque example address.
+            #
+            # 198.51.100.0/24 → 254 unique fakes; if the session somehow
+            # blows past that, wrap into 203.0.113.0/24.
+            if n <= 254:
+                return f"198.51.100.{n}"
+            return f"203.0.113.{((n - 1) % 254) + 1}"
 
         if kind == "ipv6":
-            return "::1"
+            # RFC 3849 — documentation range 2001:db8::/32. Returning a
+            # constant ::1 (loopback) for every detection broke the
+            # 1:1 mapping the moment a session contained more than one
+            # IPv6 address, AND made the model reason about loopback
+            # semantics.
+            return f"2001:db8::{n:x}"
 
         # host_port handled in the shared block above
 
@@ -736,6 +795,13 @@ class Sanitizer:
 
         if kind == "token":
             return f"FAKE_TOKEN_{n:04d}_{'x' * 8}"
+
+        if kind == "credential":
+            # Render credentials as opaque strings that look like real
+            # secrets so the model still treats them as sensitive (instead
+            # of "the password is FAKE_CREDENTIAL_001 which is clearly a
+            # placeholder, so I'll ignore it…").
+            return f"sk-faux-{n:04d}-{'x' * 16}"
 
         return f"FAKE_{kind.upper()}_{n:03d}"
 
@@ -777,8 +843,59 @@ class Sanitizer:
                 if r.entity_type == "PHONE_NUMBER" and \
                         _CC_4x4_RE.fullmatch(value.strip()):
                     continue
+                # Presidio's URL recognizer is overly greedy in two
+                # opposite directions:
+                #
+                #  1. On code like `psycopg2.connect(`, it stops at
+                #     `psycopg2.co` (Colombia ccTLD) and reports a
+                #     "URL" — but the next char is a letter and the
+                #     whole token is an identifier, not a hostname.
+                #
+                #  2. On real domains like `nexabank.com`, it
+                #     sometimes stops at `nexabank.co` for the same
+                #     ccTLD reason, but the next char (`m`) is part
+                #     of the actual `.com` TLD.
+                #
+                # If the next char is alphanumeric or hyphen, try to
+                # extend the span to the right and accept the longer
+                # value iff `_VALID_HOST_RE` says it's a real hostname.
+                # Otherwise drop the hit — it's a code identifier.
+                if r.entity_type == "URL":
+                    # First, trim surrounding JSON / shell punctuation
+                    # that Presidio sometimes swallows ("internal.vpn.com"
+                    # arrives with the literal quotes attached, which
+                    # breaks _is_valid_host downstream and the whole hit
+                    # silently no-ops).
+                    s_, e_ = r.start, r.end
+                    while s_ < e_ and not (text[s_].isalnum() or text[s_] in ":/"):
+                        s_ += 1
+                    while e_ > s_ and not (text[e_ - 1].isalnum() or text[e_ - 1] in "/"):
+                        e_ -= 1
+                    # Then handle the opposite case: Presidio stops at
+                    # `psycopg2.co` / `nexabank.co`, but the real string
+                    # continues into a longer identifier or TLD. If it
+                    # does, extend and accept iff `_HOSTNAME_RE`
+                    # validates it (so code identifiers like
+                    # `psycopg2.connect` get rejected).
+                    if e_ < len(text) and (text[e_].isalnum() or text[e_] == "-"):
+                        j = e_
+                        while j < len(text) and (text[j].isalnum() or text[j] in "-."):
+                            j += 1
+                        while j > e_ and text[j - 1] == ".":
+                            j -= 1
+                        extended = text[s_:j]
+                        if _HOSTNAME_RE.fullmatch(extended):
+                            e_ = j
+                        else:
+                            continue
+                    value = text[s_:e_]
+                    r_start = s_
+                    r_end = e_
+                else:
+                    r_start = r.start
+                    r_end = r.end
                 kind = _PRESIDIO_KIND.get(r.entity_type, r.entity_type.lower())
-                hits.append((r.start, r.end, value, kind))
+                hits.append((r_start, r_end, value, kind))
         return hits
 
     def _regex_detect(self, text: str) -> List[Tuple[int, int, str, str]]:
@@ -786,6 +903,14 @@ class Sanitizer:
         for kind, rx in _REGEX_PATTERNS:
             for m in rx.finditer(text):
                 hits.append((m.start(), m.end(), m.group(), kind))
+        # Grouped patterns: replace only the named capture group span
+        # (e.g. the credential VALUE, not the literal "password=" prefix).
+        for kind, rx, group in _REGEX_PATTERNS_GROUPED:
+            for m in rx.finditer(text):
+                if m.group(group) is None:
+                    continue
+                s, e = m.span(group)
+                hits.append((s, e, m.group(group), kind))
         return hits
 
     @staticmethod

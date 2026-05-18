@@ -54,6 +54,14 @@ UPSTREAM_VERIFY = os.getenv("UPSTREAM_VERIFY", "true").lower() not in (
 # verification on while trusting Burp's exported CA cert).
 UPSTREAM_CA_BUNDLE = os.getenv("UPSTREAM_CA_BUNDLE", "").strip() or None
 
+# When true, record the sanitized upstream payload (and desanitized response)
+# of every /v1/messages call into an in-memory ring buffer, surfaced via
+# GET /sessions/<id>/audit. Used by the integration test suite to verify that
+# no real PII reached Anthropic. Off by default — sanitized bodies still
+# contain conversation content and should not be exposed in production.
+DEBUG_AUDIT = os.getenv("DEBUG_AUDIT", "").lower() in ("1", "true", "yes", "on")
+_AUDIT_MAX_PER_SESSION = 20
+
 
 def _httpx_client(**extra) -> httpx.AsyncClient:
     """Build an httpx.AsyncClient pre-wired with the configured upstream
@@ -117,6 +125,18 @@ def _get_session(session_id: str) -> Sanitizer:
     if session_id not in _sessions:
         _sessions[session_id] = Sanitizer()
     return _sessions[session_id]
+
+
+_audit_log: dict[str, list[dict]] = {}
+
+
+def _audit_record(session_id: str, entry: dict) -> None:
+    if not DEBUG_AUDIT:
+        return
+    buf = _audit_log.setdefault(session_id, [])
+    buf.append(entry)
+    if len(buf) > _AUDIT_MAX_PER_SESSION:
+        del buf[: len(buf) - _AUDIT_MAX_PER_SESSION]
 
 
 # ---------------------------------------------------------------------------
@@ -268,7 +288,21 @@ async def get_mappings(session_id: str):
 async def clear_session(session_id: str):
     """Wipe a session's mapping table (forces fresh fake values next time)."""
     _sessions.pop(session_id, None)
+    _audit_log.pop(session_id, None)
     return {"status": "cleared", "session_id": session_id}
+
+
+@app.get("/sessions/{session_id}/audit")
+async def get_audit(session_id: str):
+    """Return the sanitized upstream payloads + desanitized responses recorded
+    for a session. Requires DEBUG_AUDIT=1. Used by the integration test suite
+    to verify that no real PII reached api.anthropic.com."""
+    if not DEBUG_AUDIT:
+        raise HTTPException(
+            status_code=404,
+            detail="Audit log disabled. Set DEBUG_AUDIT=1 to enable.",
+        )
+    return {"session_id": session_id, "entries": _audit_log.get(session_id, [])}
 
 
 # ---------------------------------------------------------------------------
@@ -400,6 +434,14 @@ async def _stream_desanitized(
     desanitized = "\n\n".join(out_events)
 
     if trace_info is not None:
+        _audit_record(trace_info["session_id"], {
+            "ts": time.time(),
+            "route": "POST /v1/messages (stream)",
+            "streaming": True,
+            "sanitized_request": payload,
+            "desanitized_response_sse": desanitized,
+            "upstream_status": status,
+        })
         _log_trace(
             route="POST /v1/messages (stream)",
             session_id=trace_info["session_id"],
@@ -532,6 +574,14 @@ async def proxy_messages(
     import json as _json  # noqa: PLC0415
     _bytes_out = len(_json.dumps(desanitized, ensure_ascii=False))
     _bump("bytes_desanitized_out", _bytes_out)
+    _audit_record(session_id, {
+        "ts": time.time(),
+        "route": "POST /v1/messages",
+        "streaming": False,
+        "sanitized_request": clean_body,
+        "desanitized_response": desanitized,
+        "upstream_status": resp.status_code,
+    })
     _log_trace(
         route="POST /v1/messages",
         session_id=session_id,

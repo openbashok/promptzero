@@ -90,21 +90,24 @@ def gen_email() -> str:
 
 
 def gen_ipv4() -> str:
-    # Pick from realistic-looking private + public ranges, but never the
-    # synthetic 127.0.0.0/8 range (so we don't generate "real" values
-    # that collide with our fakes by construction).
+    # Pick from realistic-looking private + public ranges. Exclude RFC
+    # 5737 documentation blocks (198.51.100.0/24, 203.0.113.0/24) and
+    # loopback (127.0.0.0/8) — the sanitizer mints fakes inside those
+    # ranges, so generating "real" values there would falsely collide
+    # by construction and fail the round-trip invariant.
     base = random.choice([
         (10, random.randint(0, 255), random.randint(0, 255), random.randint(1, 254)),
         (172, random.randint(16, 31), random.randint(0, 255), random.randint(1, 254)),
         (192, 168, random.randint(0, 255), random.randint(1, 254)),
-        (203, 0, 113, random.randint(1, 254)),
-        (198, 51, 100, random.randint(1, 254)),
+        (45, random.randint(1, 254), random.randint(0, 255), random.randint(1, 254)),
+        (185, random.randint(1, 254), random.randint(0, 255), random.randint(1, 254)),
     ])
     return ".".join(str(o) for o in base)
 
 
 def gen_ipv6() -> str:
-    parts = [f"{random.randint(0, 65535):x}" for _ in range(random.randint(3, 8))]
+    # Avoid 2001:db8::/32 (RFC 3849 — the sanitizer's fake range).
+    parts = [f"{random.randint(0x1000, 0xffff):x}" for _ in range(random.randint(3, 8))]
     return ":".join(parts)
 
 
