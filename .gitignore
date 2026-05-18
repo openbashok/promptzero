@@ -11,3 +11,7 @@ env/
 dist/
 build/
 .claude/
+
+# pentest_validate.py writes per-host reports here — they contain real
+# hostnames / IPs and should never be committed.
+examples/poc/reports/
